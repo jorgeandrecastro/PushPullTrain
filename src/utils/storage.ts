@@ -1,8 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { WorkoutSession, Program } from '../types';
+import { WorkoutSession, Program, AppSettings } from '../types';
 
 const SESSIONS_KEY = 'workout_sessions';
 const PROGRAMS_KEY = 'workout_programs';
+const SETTINGS_KEY = 'app_settings';
 
 export const storage = {
   // Sessions
@@ -117,6 +118,32 @@ export const storage = {
     } catch (error) {
       console.error('Error deleting program:', error);
       throw error;
+    }
+  },
+
+  // Settings
+  async saveSettings(settings: AppSettings): Promise<void> {
+    try {
+      await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      throw error;
+    }
+  },
+
+  async loadSettings(): Promise<AppSettings> {
+    try {
+      const data = await AsyncStorage.getItem(SETTINGS_KEY);
+      return data ? JSON.parse(data) : {
+        restBetweenSets: 90,
+        restBetweenExercises: 120
+      };
+    } catch (error) {
+      console.error('Error loading settings:', error);
+      return {
+        restBetweenSets: 90,
+        restBetweenExercises: 120
+      };
     }
   },
 };

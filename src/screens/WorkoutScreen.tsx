@@ -9,7 +9,9 @@ import {
   Modal,
   useWindowDimensions,
   StatusBar,
-  Platform
+  Platform,
+  TextInput,
+  Animated
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -17,7 +19,7 @@ import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { RootStackParamList } from '../../App';
 import { storage } from '../utils/storage';
-import { WorkoutSession, Exercise, Program } from '../types';
+import { WorkoutSession, Exercise, Program, TimerState, AppSettings } from '../types';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Workout'>;
@@ -35,8 +37,23 @@ export default function WorkoutScreen({ navigation, route }: Props) {
   const [showProgramSelector, setShowProgramSelector] = useState(false);
   const [timer, setTimer] = useState(0);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
-  const [restTimer, setRestTimer] = useState(0);
   const [activeExerciseId, setActiveExerciseId] = useState<string | null>(null);
+
+  // États pour le chronomètre de repos
+  const [restTimer, setRestTimer] = useState<TimerState>({
+    isRunning: false,
+    isPaused: false,
+    timeLeft: 0,
+    type: null
+  });
+  const [settings, setSettings] = useState<AppSettings>({
+    restBetweenSets: 90,
+    restBetweenExercises: 120
+  });
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Animation pour le timer de repos
+  const scaleAnim = React.useRef(new Animated.Value(1)).current;
 
   useFocusEffect(
     useCallback(() => {
@@ -54,27 +71,41 @@ export default function WorkoutScreen({ navigation, route }: Props) {
     return () => clearInterval(interval);
   }, [isTimerRunning]);
 
+  // Gestion du chronomètre de repos avec animation
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (restTimer > 0) {
+    if (restTimer.isRunning && !restTimer.isPaused && restTimer.timeLeft > 0) {
       interval = setInterval(() => {
-        setRestTimer(t => {
-          if (t <= 1) {
-            Alert.alert('Repos terminé !', 'Prêt pour la prochaine série ?');
-            return 0;
-          }
-          return t - 1;
-        });
+        setRestTimer(prev => ({ ...prev, timeLeft: prev.timeLeft - 1 }));
+        
+        // Animation pulse chaque seconde
+        Animated.sequence([
+          Animated.timing(scaleAnim, {
+            toValue: 1.05,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+          Animated.timing(scaleAnim, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+        ]).start();
       }, 1000);
+    } else if (restTimer.timeLeft === 0 && restTimer.isRunning) {
+      handleRestTimerComplete();
     }
     return () => clearInterval(interval);
-  }, [restTimer]);
+  }, [restTimer.isRunning, restTimer.isPaused, restTimer.timeLeft]);
 
   const loadData = async () => {
     try {
       const sessions = await storage.getSessionsByDate(date);
       const progs = await storage.loadPrograms();
+      const savedSettings = await storage.loadSettings();
+      
       setPrograms(progs);
+      setSettings(savedSettings);
 
       if (sessions.length > 0) {
         setSession(sessions[0]);
@@ -141,18 +172,69 @@ export default function WorkoutScreen({ navigation, route }: Props) {
       ex.id === exerciseId ? { ...ex, completed: !ex.completed } : ex
     );
 
-    if (!exercise.completed && exercise.restTime > 0) {
-      setRestTimer(exercise.restTime);
-      setActiveExerciseId(exerciseId);
-    }
-
     try {
       const updatedSession = { ...session, exercises: updatedExercises };
       await storage.updateSession(updatedSession);
       setSession(updatedSession);
+
+      // Démarrer le chronomètre de repos si l'exercice est marqué comme complété
+      if (!exercise.completed) {
+        startSetRest(exercise.name);
+      }
     } catch (error) {
       Alert.alert('Erreur', 'Impossible de mettre à jour l\'exercice');
     }
+  };
+
+  // Fonctions pour le chronomètre de repos
+  const startSetRest = (exerciseName: string) => {
+    setRestTimer({
+      isRunning: true,
+      isPaused: false,
+      timeLeft: settings.restBetweenSets,
+      type: 'set',
+      currentExercise: exerciseName
+    });
+  };
+
+  const startExerciseRest = (currentExercise: string, nextExercise?: string) => {
+    setRestTimer({
+      isRunning: true,
+      isPaused: false,
+      timeLeft: settings.restBetweenExercises,
+      type: 'exercise',
+      currentExercise,
+      nextExercise
+    });
+  };
+
+  const toggleRestTimerPause = () => {
+    setRestTimer(prev => ({ ...prev, isPaused: !prev.isPaused }));
+  };
+
+  const skipRestTimer = () => {
+    setRestTimer({
+      isRunning: false,
+      isPaused: false,
+      timeLeft: 0,
+      type: null
+    });
+  };
+
+  const handleRestTimerComplete = () => {
+    setRestTimer({
+      isRunning: false,
+      isPaused: false,
+      timeLeft: 0,
+      type: null
+    });
+    // Notification visuelle discrète au lieu d'une alerte intrusive
+  };
+
+  const updateSettings = async (newSettings: AppSettings) => {
+    setSettings(newSettings);
+    await storage.saveSettings(newSettings);
+    setShowSettings(false);
   };
 
   const finishWorkout = async () => {
@@ -162,9 +244,10 @@ export default function WorkoutScreen({ navigation, route }: Props) {
       'Terminer la séance',
       'Voulez-vous vraiment terminer cette séance ?',
       [
-        { text: 'Annuler', style: 'cancel' },
+        { text: 'Continuer', style: 'cancel' },
         {
           text: 'Terminer',
+          style: 'destructive',
           onPress: async () => {
             try {
               const updatedSession = {
@@ -192,7 +275,13 @@ export default function WorkoutScreen({ navigation, route }: Props) {
     if (hrs > 0) {
       return `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
     }
-    return `${mins}:${String(secs).padStart(2, '0')}`;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
+  // Fonction pour obtenir le prochain exercice non complété
+  const getNextExercise = () => {
+    if (!session) return null;
+    return session.exercises.find(ex => !ex.completed);
   };
 
   if (!session) {
@@ -202,8 +291,11 @@ export default function WorkoutScreen({ navigation, route }: Props) {
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Choisir un programme</Text>
-              <TouchableOpacity onPress={() => navigation.goBack()}>
-                <Ionicons name="close" size={28} color="#000" />
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={() => navigation.goBack()}
+              >
+                <Ionicons name="close" size={24} color="#666" />
               </TouchableOpacity>
             </View>
             <ScrollView 
@@ -213,19 +305,16 @@ export default function WorkoutScreen({ navigation, route }: Props) {
               {programs.map(program => (
                 <TouchableOpacity
                   key={program.id}
-                  style={[
-                    styles.programCard,
-                    isLandscape && styles.programCardLandscape
-                  ]}
+                  style={styles.programCard}
                   onPress={() => createSessionFromProgram(program)}
                 >
                   <View style={[styles.programIcon, { backgroundColor: program.color }]}>
-                    <Ionicons name="fitness" size={24} color="#fff" />
+                    <Ionicons name="barbell" size={24} color="#fff" />
                   </View>
                   <View style={styles.programInfo}>
                     <Text style={styles.programName}>{program.name}</Text>
                     <Text style={styles.programDetails}>
-                      {program.exercises.length} exercices
+                      {program.exercises.length} exercice{program.exercises.length > 1 ? 's' : ''}
                     </Text>
                   </View>
                   <Ionicons name="chevron-forward" size={20} color="#C7C7CC" />
@@ -241,81 +330,178 @@ export default function WorkoutScreen({ navigation, route }: Props) {
   const completedCount = session.exercises.filter(e => e.completed).length;
   const totalCount = session.exercises.length;
   const progress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+  const nextExercise = getNextExercise();
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f8f9fa" />
+      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+      
+      {/* Overlay du chronomètre de repos */}
+      {restTimer.isRunning && (
+        <View style={styles.restTimerOverlay}>
+          <View style={styles.restTimerContainer}>
+            <View style={styles.restTimerHeader}>
+              <Ionicons 
+                name={restTimer.type === 'set' ? "repeat" : "barbell"} 
+                size={28} 
+                color="#FFF" 
+              />
+              <Text style={styles.restTimerTitle}>
+                Repos {restTimer.type === 'set' ? 'entre les séries' : 'entre les exercices'}
+              </Text>
+            </View>
+            
+            {restTimer.currentExercise && (
+              <Text style={styles.restTimerExercise}>{restTimer.currentExercise}</Text>
+            )}
+            
+            {restTimer.nextExercise && (
+              <View style={styles.nextExerciseContainer}>
+                <Text style={styles.nextExerciseLabel}>Exercice suivant:</Text>
+                <Text style={styles.nextExerciseName}>{restTimer.nextExercise}</Text>
+              </View>
+            )}
+
+            <Animated.Text 
+              style={[
+                styles.restTimerTime,
+                { transform: [{ scale: scaleAnim }] }
+              ]}
+            >
+              {formatTime(restTimer.timeLeft)}
+            </Animated.Text>
+            
+            <View style={styles.restTimerControls}>
+              <TouchableOpacity 
+                style={[styles.restTimerButton, styles.pauseButton]}
+                onPress={toggleRestTimerPause}
+              >
+                <Ionicons 
+                  name={restTimer.isPaused ? "play" : "pause"} 
+                  size={22} 
+                  color="#FFF" 
+                />
+                <Text style={styles.restTimerButtonText}>
+                  {restTimer.isPaused ? 'Reprendre' : 'Pause'}
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.restTimerButton, styles.skipButton]}
+                onPress={skipRestTimer}
+              >
+                <Ionicons name="play-skip-forward" size={22} color="#FFF" />
+                <Text style={styles.restTimerButtonText}>Passer</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
       <View style={[
         styles.container,
         isLandscape && styles.containerLandscape
       ]}>
-        {/* Header avec timer */}
+        {/* Header avec timer et paramètres */}
         <View style={[
-          styles.timerSection,
-          isLandscape && styles.timerSectionLandscape
+          styles.headerSection,
+          isLandscape && styles.headerSectionLandscape
         ]}>
-          <Text style={styles.timerLabel}>Durée de la séance</Text>
-          <Text style={[
-            styles.timerText,
-            isLandscape && styles.timerTextLandscape
-          ]}>
-            {formatTime(timer)}
-          </Text>
-          {!session.startTime && (
-            <TouchableOpacity style={styles.startButton} onPress={startWorkout}>
-              <Ionicons name="play" size={20} color="#fff" />
-              <Text style={styles.startButtonText}>Démarrer</Text>
+          <View style={styles.headerTop}>
+            <TouchableOpacity 
+              style={styles.backButton}
+              onPress={() => navigation.goBack()}
+            >
+              <Ionicons name="chevron-back" size={24} color="#007AFF" />
+              <Text style={styles.backButtonText}>Retour</Text>
             </TouchableOpacity>
-          )}
-          {session.startTime && !session.endTime && (
+            
+            <TouchableOpacity 
+              style={styles.settingsButton}
+              onPress={() => setShowSettings(true)}
+            >
+              <Ionicons name="settings-outline" size={22} color="#666" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.timerContainer}>
+            <Text style={styles.timerLabel}>Durée de la séance</Text>
+            <Text style={[
+              styles.timerText,
+              isLandscape && styles.timerTextLandscape
+            ]}>
+              {formatTime(timer)}
+            </Text>
+          </View>
+
+          {!session.startTime ? (
+            <TouchableOpacity style={styles.startButton} onPress={startWorkout}>
+              <Ionicons name="play-circle" size={24} color="#fff" />
+              <Text style={styles.startButtonText}>Démarrer la séance</Text>
+            </TouchableOpacity>
+          ) : (
             <View style={styles.progressSection}>
-              <Text style={styles.progressText}>
-                {completedCount} / {totalCount} exercices
-              </Text>
+              <View style={styles.progressStats}>
+                <Text style={styles.progressText}>
+                  <Text style={styles.progressNumber}>{completedCount}</Text>
+                  <Text style={styles.progressDivider}>/</Text>
+                  <Text style={styles.progressTotal}>{totalCount}</Text>
+                  <Text style={styles.progressLabel}> exercices</Text>
+                </Text>
+              </View>
               <View style={styles.progressBar}>
-                <View style={[styles.progressFill, { width: `${progress}%` }]} />
+                <View 
+                  style={[
+                    styles.progressFill, 
+                    { width: `${progress}%` }
+                  ]} 
+                />
               </View>
             </View>
           )}
         </View>
-
-        {/* Timer de repos */}
-        {restTimer > 0 && (
-          <View style={styles.restTimerSection}>
-            <Ionicons name="timer-outline" size={24} color="#FF3B30" />
-            <Text style={styles.restTimerText}>Repos: {formatTime(restTimer)}</Text>
-            <TouchableOpacity onPress={() => setRestTimer(0)}>
-              <Ionicons name="close-circle" size={24} color="#8E8E93" />
-            </TouchableOpacity>
-          </View>
-        )}
 
         {/* Contenu principal */}
         <View style={[
           styles.mainContent,
           isLandscape && styles.mainContentLandscape
         ]}>
-          {/* Liste des exercices */}
           <ScrollView 
             style={styles.exercisesList}
             contentContainerStyle={styles.exercisesListContent}
+            showsVerticalScrollIndicator={false}
           >
+            <View style={styles.exercisesHeader}>
+              <Text style={styles.exercisesTitle}>Exercices</Text>
+              {nextExercise && (
+                <Text style={styles.nextExerciseInfo}>
+                  Suivant: {nextExercise.name}
+                </Text>
+              )}
+            </View>
+
             {session.exercises.map((exercise, index) => (
               <TouchableOpacity
                 key={exercise.id}
                 style={[
                   styles.exerciseCard,
-                  exercise.completed && styles.exerciseCardCompleted
+                  exercise.completed && styles.exerciseCardCompleted,
+                  exercise.id === nextExercise?.id && styles.exerciseCardNext
                 ]}
                 onPress={() => toggleExercise(exercise.id)}
+                activeOpacity={0.7}
               >
-                <View style={styles.exerciseNumber}>
+                <View style={[
+                  styles.exerciseNumber,
+                  exercise.completed && styles.exerciseNumberCompleted
+                ]}>
                   {exercise.completed ? (
-                    <Ionicons name="checkmark-circle" size={28} color="#4CD964" />
+                    <Ionicons name="checkmark-circle" size={24} color="#34C759" />
                   ) : (
                     <Text style={styles.exerciseNumberText}>{index + 1}</Text>
                   )}
                 </View>
+                
                 <View style={styles.exerciseContent}>
                   <Text style={[
                     styles.exerciseName,
@@ -323,30 +509,152 @@ export default function WorkoutScreen({ navigation, route }: Props) {
                   ]}>
                     {exercise.name}
                   </Text>
-                  <Text style={styles.exerciseDetails}>
-                    {exercise.sets} × {exercise.reps} reps
-                    {exercise.weight > 0 && ` • ${exercise.weight}kg`}
-                    {exercise.restTime > 0 && ` • ${exercise.restTime}s repos`}
-                  </Text>
+                  <View style={styles.exerciseDetails}>
+                    <Text style={styles.exerciseDetail}>
+                      {exercise.sets} séries
+                    </Text>
+                    <Text style={styles.exerciseDetail}>
+                      {exercise.reps} reps
+                    </Text>
+                    {exercise.weight > 0 && (
+                      <Text style={styles.exerciseDetail}>
+                        {exercise.weight} kg
+                      </Text>
+                    )}
+                  </View>
                 </View>
-                <Ionicons 
-                  name={exercise.completed ? "checkmark-circle" : "ellipse-outline"} 
-                  size={24} 
-                  color={exercise.completed ? "#4CD964" : "#C7C7CC"} 
-                />
+                
+                <View style={styles.exerciseActions}>
+                  <TouchableOpacity 
+                    style={styles.restActionButton}
+                    onPress={() => startSetRest(exercise.name)}
+                  >
+                    <Ionicons name="time-outline" size={18} color="#007AFF" />
+                  </TouchableOpacity>
+                </View>
               </TouchableOpacity>
             ))}
           </ScrollView>
 
-          {/* Bouton terminer */}
+          {/* Boutons d'action */}
           {session.startTime && !session.endTime && (
-            <View style={styles.finishButtonContainer}>
-              <TouchableOpacity style={styles.finishButton} onPress={finishWorkout}>
+            <View style={styles.actionButtonsContainer}>
+              <View style={styles.restButtonsRow}>
+                <TouchableOpacity 
+                  style={[styles.actionButton, styles.setRestButton]}
+                  onPress={() => {
+                    const currentExercise = session.exercises.find(e => !e.completed) || session.exercises[0];
+                    startSetRest(currentExercise.name);
+                  }}
+                >
+                  <Ionicons name="repeat" size={20} color="#fff" />
+                  <Text style={styles.actionButtonText}>Repos série</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={[styles.actionButton, styles.exerciseRestButton]}
+                  onPress={() => {
+                    const currentExercise = session.exercises.find(e => !e.completed) || session.exercises[0];
+                    const nextExerciseIndex = session.exercises.findIndex(e => e.id === currentExercise.id) + 1;
+                    const nextExercise = session.exercises[nextExerciseIndex];
+                    startExerciseRest(currentExercise.name, nextExercise?.name);
+                  }}
+                >
+                  <Ionicons name="barbell" size={20} color="#fff" />
+                  <Text style={styles.actionButtonText}>Repos exercice</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity 
+                style={styles.finishButton} 
+                onPress={finishWorkout}
+              >
+                <Ionicons name="flag" size={20} color="#fff" />
                 <Text style={styles.finishButtonText}>Terminer la séance</Text>
               </TouchableOpacity>
             </View>
           )}
         </View>
+
+        {/* Modal des paramètres */}
+        <Modal 
+          visible={showSettings} 
+          animationType="slide" 
+          transparent
+          statusBarTranslucent
+        >
+          <View style={styles.settingsModalContainer}>
+            <View style={styles.settingsModalContent}>
+              <View style={styles.settingsHeader}>
+                <Text style={styles.settingsTitle}>Paramètres de repos</Text>
+                <TouchableOpacity 
+                  onPress={() => setShowSettings(false)}
+                  style={styles.settingsCloseButton}
+                >
+                  <Ionicons name="close" size={24} color="#666" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.settingsBody}>
+                <View style={styles.settingItem}>
+                  <View style={styles.settingInfo}>
+                    <Ionicons name="repeat" size={20} color="#007AFF" />
+                    <Text style={styles.settingLabel}>Repos entre les séries</Text>
+                  </View>
+                  <View style={styles.settingInputContainer}>
+                    <TextInput
+                      style={styles.settingInput}
+                      value={settings.restBetweenSets.toString()}
+                      onChangeText={text => setSettings({
+                        ...settings, 
+                        restBetweenSets: parseInt(text) || 90
+                      })}
+                      keyboardType="number-pad"
+                      maxLength={3}
+                    />
+                    <Text style={styles.settingSuffix}>secondes</Text>
+                  </View>
+                </View>
+
+                <View style={styles.settingItem}>
+                  <View style={styles.settingInfo}>
+                    <Ionicons name="barbell" size={20} color="#FF9500" />
+                    <Text style={styles.settingLabel}>Repos entre les exercices</Text>
+                  </View>
+                  <View style={styles.settingInputContainer}>
+                    <TextInput
+                      style={styles.settingInput}
+                      value={settings.restBetweenExercises.toString()}
+                      onChangeText={text => setSettings({
+                        ...settings, 
+                        restBetweenExercises: parseInt(text) || 120
+                      })}
+                      keyboardType="number-pad"
+                      maxLength={3}
+                    />
+                    <Text style={styles.settingSuffix}>secondes</Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.settingsFooter}>
+                <TouchableOpacity 
+                  style={[styles.settingsButton, styles.cancelButton]}
+                  onPress={() => setShowSettings(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Annuler</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={[styles.settingsButton, styles.saveButton]}
+                  onPress={() => updateSettings(settings)}
+                >
+                  <Text style={styles.saveButtonText}>Sauvegarder</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </View>
     </SafeAreaView>
   );
@@ -355,51 +663,77 @@ export default function WorkoutScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#ffffff',
   },
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#ffffff',
   },
   containerLandscape: {
     flexDirection: 'row',
   },
-  timerSection: {
-    backgroundColor: '#fff',
-    padding: 24,
-    alignItems: 'center',
+
+  // Header Section
+  headerSection: {
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E5EA',
+    borderBottomColor: '#f0f0f0',
   },
-  timerSectionLandscape: {
+  headerSectionLandscape: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     borderBottomWidth: 0,
     borderRightWidth: 1,
-    borderRightColor: '#E5E5EA',
+    borderRightColor: '#f0f0f0',
+  },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: '#007AFF',
+    marginLeft: 4,
+  },
+  settingsButton: {
+    padding: 8,
+  },
+  timerContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
   },
   timerLabel: {
     fontSize: 14,
-    color: '#8E8E93',
+    color: '#666',
     marginBottom: 8,
+    fontWeight: '500',
   },
   timerText: {
-    fontSize: 48,
+    fontSize: 42,
     fontWeight: '700',
     color: '#000',
     fontVariant: ['tabular-nums'],
   },
   timerTextLandscape: {
-    fontSize: 36,
+    fontSize: 32,
   },
   startButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-    borderRadius: 24,
-    marginTop: 16,
+    justifyContent: 'center',
+    backgroundColor: '#34C759',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 12,
     gap: 8,
   },
   startButtonText: {
@@ -409,38 +743,41 @@ const styles = StyleSheet.create({
   },
   progressSection: {
     width: '100%',
-    marginTop: 16,
+  },
+  progressStats: {
+    alignItems: 'center',
+    marginBottom: 12,
   },
   progressText: {
     fontSize: 16,
-    color: '#8E8E93',
-    marginBottom: 8,
-    textAlign: 'center',
+    fontWeight: '600',
+  },
+  progressNumber: {
+    color: '#34C759',
+  },
+  progressDivider: {
+    color: '#666',
+  },
+  progressTotal: {
+    color: '#000',
+  },
+  progressLabel: {
+    color: '#666',
+    fontWeight: '400',
   },
   progressBar: {
     height: 6,
-    backgroundColor: '#E5E5EA',
+    backgroundColor: '#f0f0f0',
     borderRadius: 3,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#4CD964',
+    backgroundColor: '#34C759',
+    borderRadius: 3,
   },
-  restTimerSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFE5E5',
-    padding: 12,
-    gap: 12,
-  },
-  restTimerText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#FF3B30',
-    fontVariant: ['tabular-nums'],
-  },
+
+  // Main Content
   mainContent: {
     flex: 1,
   },
@@ -451,9 +788,27 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   exercisesListContent: {
-    padding: 16,
-    paddingBottom: 8,
+    padding: 20,
+    paddingBottom: 10,
   },
+  exercisesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  exercisesTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#000',
+  },
+  nextExerciseInfo: {
+    fontSize: 14,
+    color: '#666',
+    fontStyle: 'italic',
+  },
+
+  // Exercise Cards
   exerciseCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -461,21 +816,37 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     marginBottom: 12,
-    gap: 12,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   exerciseCardCompleted: {
-    opacity: 0.6,
+    opacity: 0.7,
+    backgroundColor: '#f8f9fa',
+  },
+  exerciseCardNext: {
+    borderColor: '#007AFF',
+    borderWidth: 1.5,
+    backgroundColor: '#f8fbff',
   },
   exerciseNumber: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#f8f9fa',
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 12,
+  },
+  exerciseNumberCompleted: {
+    backgroundColor: '#e8f8ed',
   },
   exerciseNumberText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: '#000',
   },
@@ -486,57 +857,189 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
     color: '#000',
-    marginBottom: 4,
+    marginBottom: 6,
   },
   exerciseNameCompleted: {
     textDecorationLine: 'line-through',
-    color: '#8E8E93',
+    color: '#666',
   },
   exerciseDetails: {
-    fontSize: 15,
-    color: '#8E8E93',
+    flexDirection: 'row',
+    gap: 12,
   },
-  finishButtonContainer: {
-    padding: 16,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 16,
+  exerciseDetail: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  exerciseActions: {
+    marginLeft: 8,
+  },
+  restActionButton: {
+    padding: 8,
+  },
+
+  // Action Buttons
+  actionButtonsContainer: {
+    padding: 20,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
     backgroundColor: '#fff',
     borderTopWidth: 1,
-    borderTopColor: '#E5E5EA',
+    borderTopColor: '#f0f0f0',
+    gap: 12,
   },
-  finishButton: {
-    backgroundColor: '#4CD964',
+  restButtonsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  actionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: 16,
     borderRadius: 12,
+    gap: 8,
+  },
+  setRestButton: {
+    backgroundColor: '#007AFF',
+  },
+  exerciseRestButton: {
+    backgroundColor: '#FF9500',
+  },
+  actionButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  finishButton: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FF3B30',
+    padding: 16,
+    borderRadius: 12,
+    gap: 8,
   },
   finishButtonText: {
     color: '#fff',
     fontSize: 18,
     fontWeight: '700',
   },
+
+  // Rest Timer Overlay
+  restTimerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  restTimerContainer: {
+    backgroundColor: '#1C1C1E',
+    padding: 30,
+    borderRadius: 20,
+    alignItems: 'center',
+    margin: 20,
+    minWidth: 320,
+  },
+  restTimerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 8,
+  },
+  restTimerTitle: {
+    color: 'white',
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  restTimerExercise: {
+    color: '#FFD700',
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  nextExerciseContainer: {
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  nextExerciseLabel: {
+    color: '#8E8E93',
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  nextExerciseName: {
+    color: '#32D74B',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  restTimerTime: {
+    color: 'white',
+    fontSize: 72,
+    fontWeight: '700',
+    marginVertical: 20,
+    fontVariant: ['tabular-nums'],
+  },
+  restTimerControls: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 10,
+  },
+  restTimerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    gap: 8,
+    minWidth: 120,
+    justifyContent: 'center',
+  },
+  pauseButton: {
+    backgroundColor: '#FF9500',
+  },
+  skipButton: {
+    backgroundColor: '#FF3B30',
+  },
+  restTimerButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
+  // Program Selector Modal
   modalContainer: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#ffffff',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
+    padding: 20,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E5EA',
+    borderBottomColor: '#f0f0f0',
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
     color: '#000',
   },
+  closeButton: {
+    padding: 4,
+  },
   modalScrollView: {
     flex: 1,
   },
   modalScrollContent: {
-    padding: 16,
+    padding: 20,
   },
   programCard: {
     flexDirection: 'row',
@@ -545,10 +1048,8 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     marginBottom: 12,
-    gap: 12,
-  },
-  programCardLandscape: {
-    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
   },
   programIcon: {
     width: 48,
@@ -556,6 +1057,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 12,
   },
   programInfo: {
     flex: 1,
@@ -567,7 +1069,102 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   programDetails: {
-    fontSize: 15,
-    color: '#8E8E93',
+    fontSize: 14,
+    color: '#666',
+  },
+
+  // Settings Modal
+  settingsModalContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  settingsModalContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+    maxHeight: '80%',
+  },
+  settingsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  settingsTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#000',
+  },
+  settingsCloseButton: {
+    padding: 4,
+  },
+  settingsBody: {
+    padding: 20,
+  },
+  settingItem: {
+    marginBottom: 24,
+  },
+  settingInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 8,
+  },
+  settingLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+  },
+  settingInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  settingInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#C7C7CC',
+    padding: 16,
+    borderRadius: 12,
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  settingSuffix: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
+    minWidth: 80,
+  },
+  settingsFooter: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  settingsButton: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  cancelButton: {
+    backgroundColor: '#f8f9fa',
+  },
+  saveButton: {
+    backgroundColor: '#007AFF',
+  },
+  cancelButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

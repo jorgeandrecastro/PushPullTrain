@@ -26,3 +26,18 @@ export interface Program {
   color: string;
   exercises: Exercise[];
 }
+
+export interface AppSettings {
+  restBetweenSets: number;
+  restBetweenExercises: number;
+}
+
+export interface TimerState {
+  isRunning: boolean;
+  isPaused: boolean;
+  timeLeft: number;
+  type: 'set' | 'exercise' | null;
+  currentSet?: number;
+  currentExercise?: string;
+  nextExercise?: string;
+}
