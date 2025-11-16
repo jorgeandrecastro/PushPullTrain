@@ -1,20 +1,108 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useWindowDimensions, Platform } from 'react-native';
+import HomeScreen from './src/screens/HomeScreen';
+import WorkoutScreen from './src/screens/WorkoutScreen';
+import ProgramsScreen from './src/screens/ProgramsScreen';
+import CreateProgramScreen from './src/screens/CreateProgramScreen';
+import EditProgramScreen from './src/screens/EditProgramScreen';
+import StatsScreen from './src/screens/StatsScreen';
+import { Program } from './src/types';
+
+export type RootStackParamList = {
+  Home: undefined;
+  Workout: { date: string; programId?: string };
+  Programs: undefined;
+  CreateProgram: undefined;
+  EditProgram: { program: Program };
+  Stats: undefined;
+};
+
+const Stack = createNativeStackNavigator<RootStackParamList>();
+
+const useHeaderOptions = () => {
+  const { width } = useWindowDimensions();
+  const isSmallScreen = width < 375;
+
+  return {
+    headerStyle: {
+      backgroundColor: '#ffffff',
+    },
+    headerTintColor: '#000',
+    headerTitleStyle: {
+      fontWeight: '700',
+      fontSize: isSmallScreen ? 16 : 18,
+    },
+    contentStyle: {
+      backgroundColor: '#f8f9fa',
+    },
+    headerShadowVisible: true,
+    headerBackTitle: 'Retour',
+  };
+};
 
 export default function App() {
+  const headerOptions = useHeaderOptions();
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <SafeAreaProvider>
+      <NavigationContainer>
+        <Stack.Navigator screenOptions={headerOptions}>
+          <Stack.Screen 
+            name="Home" 
+            component={HomeScreen}
+            options={{ 
+              title: 'Calendrier',
+              headerLargeTitle: Platform.OS === 'ios',
+              headerLargeTitleStyle: {
+                fontWeight: '700',
+              },
+            }}
+          />
+          <Stack.Screen 
+            name="Workout" 
+            component={WorkoutScreen}
+            options={{ 
+              title: 'Séance',
+              headerLargeTitle: false,
+            }}
+          />
+          <Stack.Screen 
+            name="Programs" 
+            component={ProgramsScreen}
+            options={{ 
+              title: 'Mes Programmes',
+              headerLargeTitle: Platform.OS === 'ios',
+            }}
+          />
+          <Stack.Screen 
+            name="CreateProgram" 
+            component={CreateProgramScreen}
+            options={{ 
+              title: 'Créer un Programme',
+              headerLargeTitle: false,
+            }}
+          />
+          <Stack.Screen 
+            name="EditProgram" 
+            component={EditProgramScreen}
+            options={{ 
+              title: 'Modifier le Programme',
+              headerLargeTitle: false,
+            }}
+          />
+          <Stack.Screen 
+            name="Stats" 
+            component={StatsScreen}
+            options={{ 
+              title: 'Statistiques',
+              headerLargeTitle: Platform.OS === 'ios',
+            }}
+          />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
