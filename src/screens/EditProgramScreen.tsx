@@ -18,7 +18,7 @@ import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { RootStackParamList } from '../../App';
 import { storage } from '../utils/storage';
-import { Program } from '../types';
+import { Program, Exercise, ExerciseSet } from '../types';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'EditProgram'>;
@@ -33,41 +33,117 @@ const PROGRAM_TYPES = [
   { id: 'custom' as const, name: 'Personnalisé', color: '#5856D6', icon: 'create' },
 ];
 
-interface ExerciseInput {
-  id: string;
-  name: string;
-  sets: string;
-  reps: string;
-  weight: string;
-  restTime: string;
-}
+const ExerciseSetManager: React.FC<{
+  sets: ExerciseSet[];
+  onChange: (sets: ExerciseSet[]) => void;
+}> = ({ sets, onChange }) => {
+  const addSet = () => {
+    const newSet: ExerciseSet = {
+      id: `set-${Date.now()}-${Math.random()}`,
+      setNumber: (sets?.length || 0) + 1,
+      reps: 8,
+      weight: 0,
+      completed: false
+    };
+    onChange([...(sets || []), newSet]);
+  };
+
+  const updateSet = (index: number, field: keyof ExerciseSet, value: any) => {
+    const newSets = [...(sets || [])];
+    if (newSets[index]) {
+      newSets[index] = { ...newSets[index], [field]: value };
+      onChange(newSets);
+    }
+  };
+
+  const removeSet = (index: number) => {
+    const newSets = (sets || []).filter((_, i) => i !== index)
+      .map((set, i) => ({ ...set, setNumber: i + 1 }));
+    onChange(newSets);
+  };
+
+  return (
+    <View style={styles.setsContainer}>
+      <Text style={styles.setsTitle}>Séries :</Text>
+      {(sets || []).map((set, index) => (
+        <View key={set.id || `set-${index}`} style={styles.setRow}>
+          <Text style={styles.setNumber}>Série {set.setNumber || index + 1}</Text>
+          <TextInput
+            style={styles.smallInput}
+            placeholder="Reps"
+            keyboardType="numeric"
+            value={(set.reps || 0).toString()}
+            onChangeText={(text) => updateSet(index, 'reps', parseInt(text) || 0)}
+          />
+          <TextInput
+            style={styles.smallInput}
+            placeholder="Poids"
+            keyboardType="numeric"
+            value={(set.weight || 0).toString()}
+            onChangeText={(text) => updateSet(index, 'weight', parseFloat(text) || 0)}
+          />
+          <TouchableOpacity onPress={() => removeSet(index)} style={styles.removeSetButton}>
+            <Ionicons name="trash-outline" size={18} color="#FF3B30" />
+          </TouchableOpacity>
+        </View>
+      ))}
+      <TouchableOpacity onPress={addSet} style={styles.addSetButton}>
+        <Ionicons name="add-circle" size={20} color="#007AFF" />
+        <Text style={styles.addSetText}>Ajouter une série</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
 
 export default function EditProgramScreen({ navigation, route }: Props) {
+  const { program: initialProgram } = route.params;
   const { width, height } = useWindowDimensions();
   const isLandscape = width > height;
   const isSmallScreen = width < 375;
   
-  const { program } = route.params;
-
-  const [programName, setProgramName] = useState(program.name);
-  const [selectedType, setSelectedType] = useState<Program['type']>(program.type);
-  const [selectedColor, setSelectedColor] = useState(program.color);
-  const [exercises, setExercises] = useState<ExerciseInput[]>(
-    program.exercises.map(ex => ({
-      id: ex.id,
-      name: ex.name,
-      sets: ex.sets.toString(),
-      reps: ex.reps.toString(),
-      weight: ex.weight.toString(),
-      restTime: ex.restTime.toString(),
+  // Validation robuste du programme initial
+  const validatedProgram = {
+    id: initialProgram?.id || `program-${Date.now()}`,
+    name: initialProgram?.name || 'Programme sans nom',
+    type: initialProgram?.type || 'custom',
+    color: initialProgram?.color || '#007AFF',
+    exercises: (initialProgram?.exercises || []).map((exercise, index) => ({
+      id: exercise?.id || `exercise-${index}-${Date.now()}`,
+      name: exercise?.name || 'Exercice sans nom',
+      sets: (exercise?.sets || []).map((set, setIndex) => ({
+        id: set?.id || `set-${setIndex}-${Date.now()}`,
+        setNumber: set?.setNumber || setIndex + 1,
+        reps: set?.reps || 8,
+        weight: set?.weight || 0,
+        completed: set?.completed || false
+      })),
+      restTime: exercise?.restTime || 90,
+      completed: exercise?.completed || false
     }))
-  );
+  };
+
+  const [programName, setProgramName] = useState(validatedProgram.name);
+  const [selectedType, setSelectedType] = useState<Program['type']>(validatedProgram.type);
+  const [selectedColor, setSelectedColor] = useState(validatedProgram.color);
+  const [exercises, setExercises] = useState<Exercise[]>(validatedProgram.exercises);
 
   const addExercise = () => {
-    setExercises([
-      ...exercises,
-      { id: Date.now().toString(), name: '', sets: '4', reps: '10', weight: '0', restTime: '90' }
-    ]);
+    const newExercise: Exercise = {
+      id: `exercise-${Date.now()}-${Math.random()}`,
+      name: '',
+      sets: [
+        {
+          id: `set-${Date.now()}-1`,
+          setNumber: 1,
+          reps: 8,
+          weight: 0,
+          completed: false
+        }
+      ],
+      restTime: 90,
+      completed: false
+    };
+    setExercises([...exercises, newExercise]);
   };
 
   const removeExercise = (id: string) => {
@@ -78,9 +154,15 @@ export default function EditProgramScreen({ navigation, route }: Props) {
     setExercises(exercises.filter(ex => ex.id !== id));
   };
 
-  const updateExercise = (id: string, field: keyof ExerciseInput, value: string) => {
+  const updateExercise = (id: string, field: keyof Exercise, value: any) => {
     setExercises(exercises.map(ex => 
       ex.id === id ? { ...ex, [field]: value } : ex
+    ));
+  };
+
+  const updateExerciseSets = (id: string, sets: ExerciseSet[]) => {
+    setExercises(exercises.map(ex => 
+      ex.id === id ? { ...ex, sets } : ex
     ));
   };
 
@@ -96,26 +178,33 @@ export default function EditProgramScreen({ navigation, route }: Props) {
       return;
     }
 
+    const emptySets = exercises.find(ex => ex.sets.length === 0);
+    if (emptySets) {
+      Alert.alert('Erreur', 'Tous les exercices doivent avoir au moins une série');
+      return;
+    }
+
     try {
       const updatedProgram: Program = {
-        ...program,
+        ...validatedProgram,
         name: programName.trim(),
         type: selectedType,
         color: selectedColor,
         exercises: exercises.map(ex => ({
-          id: ex.id,
+          ...ex,
           name: ex.name.trim(),
-          sets: parseInt(ex.sets) || 0,
-          reps: parseInt(ex.reps) || 0,
-          weight: parseFloat(ex.weight) || 0,
-          restTime: parseInt(ex.restTime) || 0,
-          completed: false,
-        })),
+          sets: ex.sets.map(set => ({
+            ...set,
+            reps: set.reps || 0,
+            weight: set.weight || 0
+          }))
+        }))
       };
 
       await storage.updateProgram(updatedProgram);
       navigation.goBack();
     } catch (error) {
+      console.error('Error updating program:', error);
       Alert.alert('Erreur', 'Impossible de sauvegarder le programme');
     }
   };
@@ -126,15 +215,23 @@ export default function EditProgramScreen({ navigation, route }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f8f9fa" />
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <StatusBar 
+        barStyle="dark-content" 
+        backgroundColor={Platform.OS === 'android' ? '#f8f9fa' : undefined}
+        translucent={Platform.OS === 'android'}
+      />
       <KeyboardAvoidingView 
         style={styles.container} 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : StatusBar.currentHeight}
       >
         <ScrollView 
           style={styles.container}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            Platform.OS === 'android' && styles.scrollContentAndroid
+          ]}
           showsVerticalScrollIndicator={false}
         >
           {/* Nom du programme */}
@@ -244,82 +341,22 @@ export default function EditProgramScreen({ navigation, route }: Props) {
                   placeholderTextColor="#C7C7CC"
                 />
 
-                <View style={[
-                  styles.exerciseRow,
-                  isLandscape && styles.exerciseRowLandscape
-                ]}>
-                  <View style={styles.exerciseInput}>
-                    <Text style={[
-                      styles.inputLabel,
-                      isSmallScreen && styles.inputLabelSmall
-                    ]}>Séries</Text>
-                    <TextInput
-                      style={[
-                        styles.smallInput,
-                        isSmallScreen && styles.smallInputSmall
-                      ]}
-                      value={exercise.sets}
-                      onChangeText={(value) => updateExercise(exercise.id, 'sets', value)}
-                      keyboardType="number-pad"
-                      placeholder="4"
-                      placeholderTextColor="#C7C7CC"
-                    />
-                  </View>
-
-                  <View style={styles.exerciseInput}>
-                    <Text style={[
-                      styles.inputLabel,
-                      isSmallScreen && styles.inputLabelSmall
-                    ]}>Reps</Text>
-                    <TextInput
-                      style={[
-                        styles.smallInput,
-                        isSmallScreen && styles.smallInputSmall
-                      ]}
-                      value={exercise.reps}
-                      onChangeText={(value) => updateExercise(exercise.id, 'reps', value)}
-                      keyboardType="number-pad"
-                      placeholder="10"
-                      placeholderTextColor="#C7C7CC"
-                    />
-                  </View>
-
-                  <View style={styles.exerciseInput}>
-                    <Text style={[
-                      styles.inputLabel,
-                      isSmallScreen && styles.inputLabelSmall
-                    ]}>Poids (kg)</Text>
-                    <TextInput
-                      style={[
-                        styles.smallInput,
-                        isSmallScreen && styles.smallInputSmall
-                      ]}
-                      value={exercise.weight}
-                      onChangeText={(value) => updateExercise(exercise.id, 'weight', value)}
-                      keyboardType="numeric"
-                      placeholder="0"
-                      placeholderTextColor="#C7C7CC"
-                    />
-                  </View>
-
-                  <View style={styles.exerciseInput}>
-                    <Text style={[
-                      styles.inputLabel,
-                      isSmallScreen && styles.inputLabelSmall
-                    ]}>Repos (s)</Text>
-                    <TextInput
-                      style={[
-                        styles.smallInput,
-                        isSmallScreen && styles.smallInputSmall
-                      ]}
-                      value={exercise.restTime}
-                      onChangeText={(value) => updateExercise(exercise.id, 'restTime', value)}
-                      keyboardType="number-pad"
-                      placeholder="90"
-                      placeholderTextColor="#C7C7CC"
-                    />
-                  </View>
+                <View style={styles.restTimeContainer}>
+                  <Text style={styles.restTimeLabel}>Temps de repos entre les séries (secondes)</Text>
+                  <TextInput
+                    style={styles.restTimeInput}
+                    value={exercise.restTime.toString()}
+                    onChangeText={(value) => updateExercise(exercise.id, 'restTime', parseInt(value) || 90)}
+                    keyboardType="number-pad"
+                    placeholder="90"
+                    placeholderTextColor="#C7C7CC"
+                  />
                 </View>
+
+                <ExerciseSetManager
+                  sets={exercise.sets}
+                  onChange={(sets) => updateExerciseSets(exercise.id, sets)}
+                />
               </View>
             ))}
           </View>
@@ -351,6 +388,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+  },
+  scrollContentAndroid: {
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
   section: {
     backgroundColor: '#fff',
@@ -468,39 +508,72 @@ const styles = StyleSheet.create({
   exerciseNumberSmall: {
     fontSize: 14,
   },
-  exerciseRow: {
-    flexDirection: 'row',
-    gap: 8,
+  restTimeContainer: {
     marginTop: 12,
   },
-  exerciseRowLandscape: {
-    gap: 6,
-  },
-  exerciseInput: {
-    flex: 1,
-  },
-  inputLabel: {
-    fontSize: 12,
+  restTimeLabel: {
+    fontSize: 14,
     fontWeight: '600',
     color: '#8E8E93',
-    marginBottom: 4,
-    textAlign: 'center',
+    marginBottom: 8,
   },
-  inputLabelSmall: {
-    fontSize: 11,
-  },
-  smallInput: {
+  restTimeInput: {
     borderWidth: 1,
     borderColor: '#E5E5EA',
     borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    backgroundColor: '#fff',
+    textAlign: 'center',
+  },
+  // Styles pour le gestionnaire de séries
+  setsContainer: {
+    marginTop: 12,
+  },
+  setsTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 8,
+  },
+  setRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  setNumber: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    minWidth: 70,
+  },
+  smallInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    borderRadius: 6,
     padding: 8,
     fontSize: 14,
     backgroundColor: '#fff',
     textAlign: 'center',
   },
-  smallInputSmall: {
-    padding: 6,
-    fontSize: 13,
+  removeSetButton: {
+    padding: 4,
+  },
+  addSetButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    backgroundColor: '#f0f8ff',
+    borderRadius: 8,
+    gap: 8,
+  },
+  addSetText: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
   saveButton: {
     backgroundColor: '#007AFF',

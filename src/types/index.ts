@@ -1,9 +1,15 @@
+export interface ExerciseSet {
+  id: string;
+  setNumber: number;
+  reps: number;
+  weight: number;
+  completed: boolean;
+}
+
 export interface Exercise {
   id: string;
   name: string;
-  sets: number;
-  reps: number;
-  weight: number;
+  sets: ExerciseSet[];
   restTime: number;
   completed: boolean;
 }
@@ -37,7 +43,7 @@ export interface TimerState {
   isPaused: boolean;
   timeLeft: number;
   type: 'set' | 'exercise' | null;
-  currentSet?: number;
   currentExercise?: string;
+  currentSet?: number;
   nextExercise?: string;
 }

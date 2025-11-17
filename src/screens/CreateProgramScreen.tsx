@@ -17,7 +17,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { RootStackParamList } from '../../App';
 import { storage } from '../utils/storage';
-import { Program } from '../types';
+import { Program, Exercise, ExerciseSet } from '../types';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'CreateProgram'>;
@@ -34,11 +34,69 @@ const PROGRAM_TYPES = [
 interface ExerciseInput {
   id: string;
   name: string;
-  sets: string;
-  reps: string;
-  weight: string;
   restTime: string;
+  sets: ExerciseSet[];
 }
+
+const ExerciseSetManager: React.FC<{
+  sets: ExerciseSet[];
+  onChange: (sets: ExerciseSet[]) => void;
+}> = ({ sets, onChange }) => {
+  const addSet = () => {
+    const newSet: ExerciseSet = {
+      id: `set-${Date.now()}-${Math.random()}`,
+      setNumber: sets.length + 1,
+      reps: 8,
+      weight: 0,
+      completed: false
+    };
+    onChange([...sets, newSet]);
+  };
+
+  const updateSet = (index: number, field: keyof ExerciseSet, value: any) => {
+    const newSets = [...sets];
+    newSets[index] = { ...newSets[index], [field]: value };
+    onChange(newSets);
+  };
+
+  const removeSet = (index: number) => {
+    const newSets = sets.filter((_, i) => i !== index)
+      .map((set, i) => ({ ...set, setNumber: i + 1 }));
+    onChange(newSets);
+  };
+
+  return (
+    <View style={styles.setsContainer}>
+      <Text style={styles.setsTitle}>Séries :</Text>
+      {sets.map((set, index) => (
+        <View key={set.id} style={styles.setRow}>
+          <Text style={styles.setNumber}>Série {set.setNumber}</Text>
+          <TextInput
+            style={styles.smallInput}
+            placeholder="Reps"
+            keyboardType="numeric"
+            value={set.reps.toString()}
+            onChangeText={(text) => updateSet(index, 'reps', parseInt(text) || 0)}
+          />
+          <TextInput
+            style={styles.smallInput}
+            placeholder="Poids"
+            keyboardType="numeric"
+            value={set.weight.toString()}
+            onChangeText={(text) => updateSet(index, 'weight', parseFloat(text) || 0)}
+          />
+          <TouchableOpacity onPress={() => removeSet(index)} style={styles.removeSetButton}>
+            <Ionicons name="trash-outline" size={18} color="#FF3B30" />
+          </TouchableOpacity>
+        </View>
+      ))}
+      <TouchableOpacity onPress={addSet} style={styles.addSetButton}>
+        <Ionicons name="add-circle" size={20} color="#007AFF" />
+        <Text style={styles.addSetText}>Ajouter une série</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
 
 export default function CreateProgramScreen({ navigation }: Props) {
   const { width, height } = useWindowDimensions();
@@ -49,13 +107,39 @@ export default function CreateProgramScreen({ navigation }: Props) {
   const [selectedType, setSelectedType] = useState<Program['type']>('push');
   const [selectedColor, setSelectedColor] = useState('#007AFF');
   const [exercises, setExercises] = useState<ExerciseInput[]>([
-    { id: Date.now().toString(), name: '', sets: '4', reps: '10', weight: '0', restTime: '90' }
+    { 
+      id: Date.now().toString(), 
+      name: '', 
+      restTime: '90',
+      sets: [
+        {
+          id: `set-${Date.now()}-1`,
+          setNumber: 1,
+          reps: 8,
+          weight: 0,
+          completed: false
+        }
+      ]
+    }
   ]);
 
   const addExercise = () => {
     setExercises([
       ...exercises,
-      { id: Date.now().toString(), name: '', sets: '4', reps: '10', weight: '0', restTime: '90' }
+      { 
+        id: Date.now().toString(), 
+        name: '', 
+        restTime: '90',
+        sets: [
+          {
+            id: `set-${Date.now()}-1`,
+            setNumber: 1,
+            reps: 8,
+            weight: 0,
+            completed: false
+          }
+        ]
+      }
     ]);
   };
 
@@ -67,9 +151,15 @@ export default function CreateProgramScreen({ navigation }: Props) {
     setExercises(exercises.filter(ex => ex.id !== id));
   };
 
-  const updateExercise = (id: string, field: keyof ExerciseInput, value: string) => {
+  const updateExercise = (id: string, field: keyof ExerciseInput, value: any) => {
     setExercises(exercises.map(ex => 
       ex.id === id ? { ...ex, [field]: value } : ex
+    ));
+  };
+
+  const updateExerciseSets = (id: string, sets: ExerciseSet[]) => {
+    setExercises(exercises.map(ex => 
+      ex.id === id ? { ...ex, sets } : ex
     ));
   };
 
@@ -85,6 +175,12 @@ export default function CreateProgramScreen({ navigation }: Props) {
       return;
     }
 
+    const emptySets = exercises.find(ex => ex.sets.length === 0);
+    if (emptySets) {
+      Alert.alert('Erreur', 'Tous les exercices doivent avoir au moins une série');
+      return;
+    }
+
     try {
       const newProgram: Program = {
         id: Date.now().toString(),
@@ -94,10 +190,8 @@ export default function CreateProgramScreen({ navigation }: Props) {
         exercises: exercises.map(ex => ({
           id: ex.id,
           name: ex.name.trim(),
-          sets: parseInt(ex.sets) || 0,
-          reps: parseInt(ex.reps) || 0,
-          weight: parseFloat(ex.weight) || 0,
-          restTime: parseInt(ex.restTime) || 0,
+          sets: ex.sets,
+          restTime: parseInt(ex.restTime) || 90,
           completed: false,
         })),
       };
@@ -105,6 +199,7 @@ export default function CreateProgramScreen({ navigation }: Props) {
       await storage.addProgram(newProgram);
       navigation.goBack();
     } catch (error) {
+      console.error('Error creating program:', error);
       Alert.alert('Erreur', 'Impossible de créer le programme');
     }
   };
@@ -241,82 +336,22 @@ export default function CreateProgramScreen({ navigation }: Props) {
                   placeholderTextColor="#C7C7CC"
                 />
 
-                <View style={[
-                  styles.exerciseRow,
-                  isLandscape && styles.exerciseRowLandscape
-                ]}>
-                  <View style={styles.exerciseInput}>
-                    <Text style={[
-                      styles.inputLabel,
-                      isSmallScreen && styles.inputLabelSmall
-                    ]}>Séries</Text>
-                    <TextInput
-                      style={[
-                        styles.smallInput,
-                        isSmallScreen && styles.smallInputSmall
-                      ]}
-                      value={exercise.sets}
-                      onChangeText={(value) => updateExercise(exercise.id, 'sets', value)}
-                      keyboardType="number-pad"
-                      placeholder="4"
-                      placeholderTextColor="#C7C7CC"
-                    />
-                  </View>
-
-                  <View style={styles.exerciseInput}>
-                    <Text style={[
-                      styles.inputLabel,
-                      isSmallScreen && styles.inputLabelSmall
-                    ]}>Reps</Text>
-                    <TextInput
-                      style={[
-                        styles.smallInput,
-                        isSmallScreen && styles.smallInputSmall
-                      ]}
-                      value={exercise.reps}
-                      onChangeText={(value) => updateExercise(exercise.id, 'reps', value)}
-                      keyboardType="number-pad"
-                      placeholder="10"
-                      placeholderTextColor="#C7C7CC"
-                    />
-                  </View>
-
-                  <View style={styles.exerciseInput}>
-                    <Text style={[
-                      styles.inputLabel,
-                      isSmallScreen && styles.inputLabelSmall
-                    ]}>Poids (kg)</Text>
-                    <TextInput
-                      style={[
-                        styles.smallInput,
-                        isSmallScreen && styles.smallInputSmall
-                      ]}
-                      value={exercise.weight}
-                      onChangeText={(value) => updateExercise(exercise.id, 'weight', value)}
-                      keyboardType="numeric"
-                      placeholder="0"
-                      placeholderTextColor="#C7C7CC"
-                    />
-                  </View>
-
-                  <View style={styles.exerciseInput}>
-                    <Text style={[
-                      styles.inputLabel,
-                      isSmallScreen && styles.inputLabelSmall
-                    ]}>Repos (s)</Text>
-                    <TextInput
-                      style={[
-                        styles.smallInput,
-                        isSmallScreen && styles.smallInputSmall
-                      ]}
-                      value={exercise.restTime}
-                      onChangeText={(value) => updateExercise(exercise.id, 'restTime', value)}
-                      keyboardType="number-pad"
-                      placeholder="90"
-                      placeholderTextColor="#C7C7CC"
-                    />
-                  </View>
+                <View style={styles.restTimeContainer}>
+                  <Text style={styles.restTimeLabel}>Temps de repos entre les séries (secondes)</Text>
+                  <TextInput
+                    style={styles.restTimeInput}
+                    value={exercise.restTime}
+                    onChangeText={(value) => updateExercise(exercise.id, 'restTime', value)}
+                    keyboardType="number-pad"
+                    placeholder="90"
+                    placeholderTextColor="#C7C7CC"
+                  />
                 </View>
+
+                <ExerciseSetManager
+                  sets={exercise.sets}
+                  onChange={(sets) => updateExerciseSets(exercise.id, sets)}
+                />
               </View>
             ))}
           </View>
@@ -468,39 +503,72 @@ const styles = StyleSheet.create({
   exerciseNumberSmall: {
     fontSize: 14,
   },
-  exerciseRow: {
-    flexDirection: 'row',
-    gap: 8,
+  restTimeContainer: {
     marginTop: 12,
   },
-  exerciseRowLandscape: {
-    gap: 6,
-  },
-  exerciseInput: {
-    flex: 1,
-  },
-  inputLabel: {
-    fontSize: 12,
+  restTimeLabel: {
+    fontSize: 14,
     fontWeight: '600',
     color: '#8E8E93',
-    marginBottom: 4,
-    textAlign: 'center',
+    marginBottom: 8,
   },
-  inputLabelSmall: {
-    fontSize: 11,
-  },
-  smallInput: {
+  restTimeInput: {
     borderWidth: 1,
     borderColor: '#E5E5EA',
     borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    backgroundColor: '#fff',
+    textAlign: 'center',
+  },
+  // Styles pour le gestionnaire de séries
+  setsContainer: {
+    marginTop: 12,
+  },
+  setsTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 8,
+  },
+  setRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  setNumber: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    minWidth: 70,
+  },
+  smallInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    borderRadius: 6,
     padding: 8,
     fontSize: 14,
     backgroundColor: '#fff',
     textAlign: 'center',
   },
-  smallInputSmall: {
-    padding: 6,
-    fontSize: 13,
+  removeSetButton: {
+    padding: 4,
+  },
+  addSetButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    backgroundColor: '#f0f8ff',
+    borderRadius: 8,
+    gap: 8,
+  },
+  addSetText: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
   createButton: {
     backgroundColor: '#007AFF',

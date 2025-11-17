@@ -40,10 +40,20 @@ export default function ProgramsScreen({ navigation }: Props) {
     try {
       const saved = await storage.loadPrograms();
       if (saved.length === 0) {
-        await storage.savePrograms(defaultPrograms);
-        setPrograms(defaultPrograms);
+        // S'assurer que les programmes par défaut ont des IDs valides
+        const programsWithValidIds = defaultPrograms.map(program => ({
+          ...program,
+          id: program.id || `program-${Date.now()}-${Math.random()}`
+        }));
+        await storage.savePrograms(programsWithValidIds);
+        setPrograms(programsWithValidIds);
       } else {
-        setPrograms(saved);
+        // S'assurer que tous les programmes chargés ont des IDs valides
+        const validPrograms = saved.map(program => ({
+          ...program,
+          id: program.id || `program-${Date.now()}-${Math.random()}`
+        }));
+        setPrograms(validPrograms);
       }
     } catch (error) {
       console.error('Erreur lors du chargement des programmes:', error);
@@ -73,59 +83,70 @@ export default function ProgramsScreen({ navigation }: Props) {
     );
   };
 
-  const renderProgramCard = ({ item }: { item: Program }) => (
-    <View style={[
-      styles.programCard,
-      isLandscape && styles.programCardLandscape,
-      isSmallScreen && styles.programCardSmall
-    ]}>
-      <TouchableOpacity
-        style={styles.programContent}
-        onPress={() => navigation.navigate('EditProgram', { program: item })}
-      >
-        <View style={[
-          styles.programIcon, 
-          { backgroundColor: item.color },
-          isSmallScreen && styles.programIconSmall
-        ]}>
-          <Ionicons name="fitness" size={isSmallScreen ? 20 : 24} color="#fff" />
-        </View>
-        <View style={styles.programInfo}>
-          <Text style={[
-            styles.programName,
-            isSmallScreen && styles.programNameSmall
-          ]}>{item.name}</Text>
-          <Text style={[
-            styles.programDetails,
-            isSmallScreen && styles.programDetailsSmall
-          ]}>
-            {item.exercises.length} exercices
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={isSmallScreen ? 18 : 20} color="#C7C7CC" />
-      </TouchableOpacity>
-      <View style={styles.programActions}>
+  const renderProgramCard = ({ item }: { item: Program }) => {
+    // S'assurer que l'item a toutes les propriétés nécessaires
+    const program = {
+      id: item.id || `program-${Date.now()}-${Math.random()}`,
+      name: item.name || 'Programme sans nom',
+      type: item.type || 'custom',
+      color: item.color || '#007AFF',
+      exercises: item.exercises || []
+    };
+
+    return (
+      <View style={[
+        styles.programCard,
+        isLandscape && styles.programCardLandscape,
+        isSmallScreen && styles.programCardSmall
+      ]}>
         <TouchableOpacity
-          style={[
-            styles.actionButton,
-            isSmallScreen && styles.actionButtonSmall
-          ]}
+          style={styles.programContent}
           onPress={() => navigation.navigate('EditProgram', { program: item })}
         >
-          <Ionicons name="create-outline" size={isSmallScreen ? 18 : 20} color="#007AFF" />
+          <View style={[
+            styles.programIcon, 
+            { backgroundColor: program.color },
+            isSmallScreen && styles.programIconSmall
+          ]}>
+            <Ionicons name="fitness" size={isSmallScreen ? 20 : 24} color="#fff" />
+          </View>
+          <View style={styles.programInfo}>
+            <Text style={[
+              styles.programName,
+              isSmallScreen && styles.programNameSmall
+            ]}>{program.name}</Text>
+            <Text style={[
+              styles.programDetails,
+              isSmallScreen && styles.programDetailsSmall
+            ]}>
+              {program.exercises.length} exercice{program.exercises.length !== 1 ? 's' : ''}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={isSmallScreen ? 18 : 20} color="#C7C7CC" />
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.actionButton,
-            isSmallScreen && styles.actionButtonSmall
-          ]}
-          onPress={() => handleDeleteProgram(item)}
-        >
-          <Ionicons name="trash-outline" size={isSmallScreen ? 18 : 20} color="#FF3B30" />
-        </TouchableOpacity>
+        <View style={styles.programActions}>
+          <TouchableOpacity
+            style={[
+              styles.actionButton,
+              isSmallScreen && styles.actionButtonSmall
+            ]}
+            onPress={() => navigation.navigate('EditProgram', { program: item })}
+          >
+            <Ionicons name="create-outline" size={isSmallScreen ? 18 : 20} color="#007AFF" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.actionButton,
+              isSmallScreen && styles.actionButtonSmall
+            ]}
+            onPress={() => handleDeleteProgram(program)}
+          >
+            <Ionicons name="trash-outline" size={isSmallScreen ? 18 : 20} color="#FF3B30" />
+          </TouchableOpacity>
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -133,7 +154,7 @@ export default function ProgramsScreen({ navigation }: Props) {
       <View style={styles.container}>
         <FlatList
           data={programs}
-          keyExtractor={item => item.id}
+          keyExtractor={item => item.id || `program-${Math.random()}`}
           renderItem={renderProgramCard}
           contentContainerStyle={[
             styles.listContent,

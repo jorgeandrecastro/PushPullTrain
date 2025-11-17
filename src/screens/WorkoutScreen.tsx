@@ -19,7 +19,7 @@ import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { RootStackParamList } from '../../App';
 import { storage } from '../utils/storage';
-import { WorkoutSession, Exercise, Program, TimerState, AppSettings } from '../types';
+import { WorkoutSession, Exercise, ExerciseSet, Program, TimerState, AppSettings } from '../types';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Workout'>;
@@ -37,8 +37,7 @@ export default function WorkoutScreen({ navigation, route }: Props) {
   const [showProgramSelector, setShowProgramSelector] = useState(false);
   const [timer, setTimer] = useState(0);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
-  const [activeExerciseId, setActiveExerciseId] = useState<string | null>(null);
-
+  
   // États pour le chronomètre de repos
   const [restTimer, setRestTimer] = useState<TimerState>({
     isRunning: false,
@@ -51,6 +50,10 @@ export default function WorkoutScreen({ navigation, route }: Props) {
     restBetweenExercises: 120
   });
   const [showSettings, setShowSettings] = useState(false);
+
+  // États pour suivre l'exercice et la série en cours
+  const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
+  const [currentSetIndex, setCurrentSetIndex] = useState(0);
 
   // Animation pour le timer de repos
   const scaleAnim = React.useRef(new Animated.Value(1)).current;
@@ -108,10 +111,33 @@ export default function WorkoutScreen({ navigation, route }: Props) {
       setSettings(savedSettings);
 
       if (sessions.length > 0) {
-        setSession(sessions[0]);
-        if (sessions[0].startTime && !sessions[0].endTime) {
+        const existingSession = sessions[0];
+        setSession(existingSession);
+        
+        // Trouver le premier exercice et série non complétés
+        let foundExerciseIndex = 0;
+        let foundSetIndex = 0;
+        let found = false;
+        
+        for (let i = 0; i < existingSession.exercises.length; i++) {
+          const exercise = existingSession.exercises[i];
+          for (let j = 0; j < exercise.sets.length; j++) {
+            if (!exercise.sets[j].completed) {
+              foundExerciseIndex = i;
+              foundSetIndex = j;
+              found = true;
+              break;
+            }
+          }
+          if (found) break;
+        }
+        
+        setCurrentExerciseIndex(foundExerciseIndex);
+        setCurrentSetIndex(foundSetIndex);
+
+        if (existingSession.startTime && !existingSession.endTime) {
           setIsTimerRunning(true);
-          const start = new Date(sessions[0].startTime).getTime();
+          const start = new Date(existingSession.startTime).getTime();
           const now = new Date().getTime();
           setTimer(Math.floor((now - start) / 1000));
         }
@@ -135,11 +161,17 @@ export default function WorkoutScreen({ navigation, route }: Props) {
         id: Date.now().toString(),
         date,
         programId: program.id,
-        exercises: program.exercises.map(ex => ({ ...ex, completed: false })),
+        exercises: program.exercises.map(ex => ({
+          ...ex,
+          completed: false,
+          sets: ex.sets.map(set => ({ ...set, completed: false }))
+        })),
         completed: false,
       };
       await storage.addSession(newSession);
       setSession(newSession);
+      setCurrentExerciseIndex(0);
+      setCurrentSetIndex(0);
       setShowProgramSelector(false);
     } catch (error) {
       Alert.alert('Erreur', 'Impossible de créer la séance');
@@ -162,47 +194,59 @@ export default function WorkoutScreen({ navigation, route }: Props) {
     }
   };
 
-  const toggleExercise = async (exerciseId: string) => {
+  const completeSet = async (exerciseIndex: number, setIndex: number) => {
     if (!session) return;
     
-    const exercise = session.exercises.find(e => e.id === exerciseId);
-    if (!exercise) return;
-
-    const updatedExercises = session.exercises.map(ex =>
-      ex.id === exerciseId ? { ...ex, completed: !ex.completed } : ex
-    );
-
+    const updatedSession = { ...session };
+    const exercise = updatedSession.exercises[exerciseIndex];
+    const set = exercise.sets[setIndex];
+    
+    // Marquer la série comme complétée
+    set.completed = true;
+    
+    // Vérifier si c'est la dernière série de l'exercice
+    const isLastSet = setIndex === exercise.sets.length - 1;
+    const isLastExercise = exerciseIndex === session.exercises.length - 1;
+    
+    if (!isLastSet) {
+      // Passer à la série suivante
+      setCurrentSetIndex(setIndex + 1);
+      // Démarrer le timer de repos entre séries
+      startRestTimer(exercise.restTime, 'set', exercise.name);
+    } else {
+      // Marquer l'exercice comme complété
+      exercise.completed = true;
+      
+      if (!isLastExercise) {
+        // Passer à l'exercice suivant
+        setCurrentExerciseIndex(exerciseIndex + 1);
+        setCurrentSetIndex(0);
+        // Démarrer le timer de repos entre exercices
+        const nextExercise = updatedSession.exercises[exerciseIndex + 1];
+        startRestTimer(settings.restBetweenExercises, 'exercise', exercise.name, nextExercise.name);
+      } else {
+        // Séance terminée
+        updatedSession.completed = true;
+        updatedSession.endTime = new Date().toISOString();
+        updatedSession.duration = timer;
+      }
+    }
+    
     try {
-      const updatedSession = { ...session, exercises: updatedExercises };
       await storage.updateSession(updatedSession);
       setSession(updatedSession);
-
-      // Démarrer le chronomètre de repos si l'exercice est marqué comme complété
-      if (!exercise.completed) {
-        startSetRest(exercise.name);
-      }
     } catch (error) {
-      Alert.alert('Erreur', 'Impossible de mettre à jour l\'exercice');
+      Alert.alert('Erreur', 'Impossible de mettre à jour la séance');
     }
   };
 
   // Fonctions pour le chronomètre de repos
-  const startSetRest = (exerciseName: string) => {
+  const startRestTimer = (duration: number, type: 'set' | 'exercise', currentExercise?: string, nextExercise?: string) => {
     setRestTimer({
       isRunning: true,
       isPaused: false,
-      timeLeft: settings.restBetweenSets,
-      type: 'set',
-      currentExercise: exerciseName
-    });
-  };
-
-  const startExerciseRest = (currentExercise: string, nextExercise?: string) => {
-    setRestTimer({
-      isRunning: true,
-      isPaused: false,
-      timeLeft: settings.restBetweenExercises,
-      type: 'exercise',
+      timeLeft: duration,
+      type,
       currentExercise,
       nextExercise
     });
@@ -228,7 +272,6 @@ export default function WorkoutScreen({ navigation, route }: Props) {
       timeLeft: 0,
       type: null
     });
-    // Notification visuelle discrète au lieu d'une alerte intrusive
   };
 
   const updateSettings = async (newSettings: AppSettings) => {
@@ -327,9 +370,10 @@ export default function WorkoutScreen({ navigation, route }: Props) {
     );
   }
 
-  const completedCount = session.exercises.filter(e => e.completed).length;
-  const totalCount = session.exercises.length;
-  const progress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+  const currentExercise = session.exercises[currentExerciseIndex];
+  const completedExercises = session.exercises.filter(e => e.completed).length;
+  const totalExercises = session.exercises.length;
+  const progress = totalExercises > 0 ? (completedExercises / totalExercises) * 100 : 0;
   const nextExercise = getNextExercise();
 
   return (
@@ -443,9 +487,9 @@ export default function WorkoutScreen({ navigation, route }: Props) {
             <View style={styles.progressSection}>
               <View style={styles.progressStats}>
                 <Text style={styles.progressText}>
-                  <Text style={styles.progressNumber}>{completedCount}</Text>
+                  <Text style={styles.progressNumber}>{completedExercises}</Text>
                   <Text style={styles.progressDivider}>/</Text>
-                  <Text style={styles.progressTotal}>{totalCount}</Text>
+                  <Text style={styles.progressTotal}>{totalExercises}</Text>
                   <Text style={styles.progressLabel}> exercices</Text>
                 </Text>
               </View>
@@ -480,91 +524,69 @@ export default function WorkoutScreen({ navigation, route }: Props) {
               )}
             </View>
 
-            {session.exercises.map((exercise, index) => (
-              <TouchableOpacity
+            {session.exercises.map((exercise, exerciseIndex) => (
+              <View
                 key={exercise.id}
                 style={[
                   styles.exerciseCard,
                   exercise.completed && styles.exerciseCardCompleted,
-                  exercise.id === nextExercise?.id && styles.exerciseCardNext
+                  exerciseIndex === currentExerciseIndex && styles.exerciseCardCurrent
                 ]}
-                onPress={() => toggleExercise(exercise.id)}
-                activeOpacity={0.7}
               >
-                <View style={[
-                  styles.exerciseNumber,
-                  exercise.completed && styles.exerciseNumberCompleted
-                ]}>
-                  {exercise.completed ? (
-                    <Ionicons name="checkmark-circle" size={24} color="#34C759" />
-                  ) : (
-                    <Text style={styles.exerciseNumberText}>{index + 1}</Text>
-                  )}
-                </View>
-                
-                <View style={styles.exerciseContent}>
-                  <Text style={[
-                    styles.exerciseName,
-                    exercise.completed && styles.exerciseNameCompleted
-                  ]}>
-                    {exercise.name}
-                  </Text>
-                  <View style={styles.exerciseDetails}>
-                    <Text style={styles.exerciseDetail}>
-                      {exercise.sets} séries
-                    </Text>
-                    <Text style={styles.exerciseDetail}>
-                      {exercise.reps} reps
-                    </Text>
-                    {exercise.weight > 0 && (
-                      <Text style={styles.exerciseDetail}>
-                        {exercise.weight} kg
-                      </Text>
+                <View style={styles.exerciseHeader}>
+                  <View style={styles.exerciseTitleContainer}>
+                    {exercise.completed ? (
+                      <Ionicons name="checkmark-circle" size={24} color="#34C759" />
+                    ) : (
+                      <Text style={styles.exerciseNumber}>{exerciseIndex + 1}</Text>
                     )}
+                    <Text style={[
+                      styles.exerciseName,
+                      exercise.completed && styles.exerciseNameCompleted
+                    ]}>
+                      {exercise.name}
+                    </Text>
                   </View>
+                  <Text style={styles.restTimeText}>{exercise.restTime}s repos</Text>
                 </View>
                 
-                <View style={styles.exerciseActions}>
-                  <TouchableOpacity 
-                    style={styles.restActionButton}
-                    onPress={() => startSetRest(exercise.name)}
-                  >
-                    <Ionicons name="time-outline" size={18} color="#007AFF" />
-                  </TouchableOpacity>
+                {/* Liste des séries */}
+                <View style={styles.setsContainer}>
+                  {exercise.sets.map((set, setIndex) => (
+                    <TouchableOpacity
+                      key={set.id}
+                      style={[
+                        styles.setCard,
+                        set.completed && styles.setCardCompleted,
+                        exerciseIndex === currentExerciseIndex && 
+                        setIndex === currentSetIndex && 
+                        styles.setCardCurrent
+                      ]}
+                      onPress={() => !set.completed && completeSet(exerciseIndex, setIndex)}
+                      disabled={set.completed}
+                    >
+                      <View style={styles.setHeader}>
+                        <Text style={styles.setNumber}>Série {set.setNumber}</Text>
+                        {set.completed && (
+                          <Ionicons name="checkmark" size={16} color="#34C759" />
+                        )}
+                      </View>
+                      <View style={styles.setDetails}>
+                        <Text style={styles.setDetail}>{set.reps} reps</Text>
+                        {set.weight > 0 && (
+                          <Text style={styles.setDetail}>{set.weight} kg</Text>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-              </TouchableOpacity>
+              </View>
             ))}
           </ScrollView>
 
           {/* Boutons d'action */}
           {session.startTime && !session.endTime && (
             <View style={styles.actionButtonsContainer}>
-              <View style={styles.restButtonsRow}>
-                <TouchableOpacity 
-                  style={[styles.actionButton, styles.setRestButton]}
-                  onPress={() => {
-                    const currentExercise = session.exercises.find(e => !e.completed) || session.exercises[0];
-                    startSetRest(currentExercise.name);
-                  }}
-                >
-                  <Ionicons name="repeat" size={20} color="#fff" />
-                  <Text style={styles.actionButtonText}>Repos série</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                  style={[styles.actionButton, styles.exerciseRestButton]}
-                  onPress={() => {
-                    const currentExercise = session.exercises.find(e => !e.completed) || session.exercises[0];
-                    const nextExerciseIndex = session.exercises.findIndex(e => e.id === currentExercise.id) + 1;
-                    const nextExercise = session.exercises[nextExerciseIndex];
-                    startExerciseRest(currentExercise.name, nextExercise?.name);
-                  }}
-                >
-                  <Ionicons name="barbell" size={20} color="#fff" />
-                  <Text style={styles.actionButtonText}>Repos exercice</Text>
-                </TouchableOpacity>
-              </View>
-
               <TouchableOpacity 
                 style={styles.finishButton} 
                 onPress={finishWorkout}
@@ -810,12 +832,10 @@ const styles = StyleSheet.create({
 
   // Exercise Cards
   exerciseCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: '#fff',
     padding: 16,
     borderRadius: 12,
-    marginBottom: 12,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: '#f0f0f0',
     shadowColor: '#000',
@@ -828,55 +848,90 @@ const styles = StyleSheet.create({
     opacity: 0.7,
     backgroundColor: '#f8f9fa',
   },
-  exerciseCardNext: {
+  exerciseCardCurrent: {
     borderColor: '#007AFF',
     borderWidth: 1.5,
     backgroundColor: '#f8fbff',
   },
-  exerciseNumber: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#f8f9fa',
-    justifyContent: 'center',
+  exerciseHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  exerciseTitleContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 12,
-  },
-  exerciseNumberCompleted: {
-    backgroundColor: '#e8f8ed',
-  },
-  exerciseNumberText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#000',
-  },
-  exerciseContent: {
     flex: 1,
   },
+  exerciseNumber: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
   exerciseName: {
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '600',
     color: '#000',
-    marginBottom: 6,
+    flex: 1,
   },
   exerciseNameCompleted: {
     textDecorationLine: 'line-through',
     color: '#666',
   },
-  exerciseDetails: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  exerciseDetail: {
+  restTimeText: {
     fontSize: 14,
     color: '#666',
     fontWeight: '500',
   },
-  exerciseActions: {
-    marginLeft: 8,
+
+  // Sets
+  setsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
-  restActionButton: {
-    padding: 8,
+  setCard: {
+    flex: 1,
+    minWidth: '48%',
+    backgroundColor: '#f8f9fa',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+  },
+  setCardCompleted: {
+    opacity: 0.6,
+    backgroundColor: '#e8f8ed',
+  },
+  setCardCurrent: {
+    borderColor: '#007AFF',
+    borderWidth: 1.5,
+    backgroundColor: '#f0f8ff',
+  },
+  setHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  setNumber: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000',
+  },
+  setDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  setDetail: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
   },
 
   // Action Buttons
@@ -886,31 +941,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#f0f0f0',
-    gap: 12,
-  },
-  restButtonsRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-    borderRadius: 12,
-    gap: 8,
-  },
-  setRestButton: {
-    backgroundColor: '#007AFF',
-  },
-  exerciseRestButton: {
-    backgroundColor: '#FF9500',
-  },
-  actionButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
   },
   finishButton: {
     flexDirection: 'row',

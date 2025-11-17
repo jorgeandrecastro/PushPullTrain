@@ -5,7 +5,9 @@ import {
   StyleSheet, 
   ScrollView, 
   useWindowDimensions,
-  StatusBar 
+  StatusBar,
+  TouchableOpacity,
+  Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -13,7 +15,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { RootStackParamList } from '../../App';
 import { storage } from '../utils/storage';
-import { WorkoutSession } from '../types';
+import { WorkoutSession, Exercise } from '../types';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Stats'>;
@@ -30,6 +32,8 @@ export default function StatsScreen({ navigation }: Props) {
     completedSessions: 0,
     totalExercises: 0,
     completedExercises: 0,
+    totalSets: 0,
+    completedSets: 0,
     totalTime: 0,
     avgTime: 0,
     thisWeek: 0,
@@ -46,42 +50,130 @@ export default function StatsScreen({ navigation }: Props) {
     try {
       const allSessions = await storage.loadSessions();
       setSessions(allSessions);
-
-      const now = new Date();
-      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-
-      const completed = allSessions.filter(s => s.completed);
-      const totalTime = completed.reduce((sum, s) => sum + (s.duration || 0), 0);
-      const totalExercises = allSessions.reduce((sum, s) => sum + s.exercises.length, 0);
-      const completedExercises = allSessions.reduce(
-        (sum, s) => sum + s.exercises.filter(e => e.completed).length,
-        0
-      );
-
-      const thisWeek = allSessions.filter(s => {
-        const sessionDate = new Date(s.date);
-        return sessionDate >= weekAgo;
-      }).length;
-
-      const thisMonth = allSessions.filter(s => {
-        const sessionDate = new Date(s.date);
-        return sessionDate >= monthAgo;
-      }).length;
-
-      setStats({
-        totalSessions: allSessions.length,
-        completedSessions: completed.length,
-        totalExercises,
-        completedExercises,
-        totalTime,
-        avgTime: completed.length > 0 ? totalTime / completed.length : 0,
-        thisWeek,
-        thisMonth,
-      });
+      calculateStats(allSessions);
     } catch (error) {
       console.error('Erreur lors du chargement des statistiques:', error);
     }
+  };
+
+  const calculateStats = (allSessions: WorkoutSession[]) => {
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const completedSessions = allSessions.filter(s => s.completed);
+    
+    // Calcul des statistiques avec la nouvelle structure de séries
+    let totalSets = 0;
+    let completedSets = 0;
+    let totalExercises = 0;
+    let completedExercises = 0;
+    let totalTime = 0;
+
+    allSessions.forEach(session => {
+      // Compter les exercices complétés (tous les sets complétés)
+      session.exercises.forEach(exercise => {
+        totalExercises++;
+        const exerciseSetsCount = exercise.sets.length;
+        const completedExerciseSets = exercise.sets.filter(set => set.completed).length;
+        
+        totalSets += exerciseSetsCount;
+        completedSets += completedExerciseSets;
+
+        // Un exercice est considéré comme complété si tous ses sets sont complétés
+        if (completedExerciseSets === exerciseSetsCount && exerciseSetsCount > 0) {
+          completedExercises++;
+        }
+      });
+
+      // Temps total des sessions complétées
+      if (session.completed && session.duration) {
+        totalTime += session.duration;
+      }
+    });
+
+    const thisWeek = allSessions.filter(s => {
+      const sessionDate = new Date(s.date);
+      return sessionDate >= weekAgo && s.completed;
+    }).length;
+
+    const thisMonth = allSessions.filter(s => {
+      const sessionDate = new Date(s.date);
+      return sessionDate >= monthAgo && s.completed;
+    }).length;
+
+    setStats({
+      totalSessions: allSessions.length,
+      completedSessions: completedSessions.length,
+      totalExercises,
+      completedExercises,
+      totalSets,
+      completedSets,
+      totalTime,
+      avgTime: completedSessions.length > 0 ? totalTime / completedSessions.length : 0,
+      thisWeek,
+      thisMonth,
+    });
+  };
+
+  const clearHistory = () => {
+    Alert.alert(
+      "Effacer l'historique",
+      "Êtes-vous sûr de vouloir supprimer toutes vos séances d'entraînement ? Cette action est irréversible.",
+      [
+        {
+          text: "Annuler",
+          style: "cancel"
+        },
+        {
+          text: "Effacer",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // Effacer toutes les sessions
+              await storage.saveSessions([]);
+              setSessions([]);
+              calculateStats([]);
+              Alert.alert("Succès", "L'historique a été effacé avec succès.");
+            } catch (error) {
+              console.error('Erreur lors de la suppression:', error);
+              Alert.alert("Erreur", "Impossible d'effacer l'historique.");
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const clearAllData = () => {
+    Alert.alert(
+      "Effacer toutes les données",
+      "Cette action supprimera TOUTES vos données (séances ET programmes). Cette action est irréversible.",
+      [
+        {
+          text: "Annuler",
+          style: "cancel"
+        },
+        {
+          text: "Tout effacer",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // Effacer toutes les sessions
+              await storage.saveSessions([]);
+              // Effacer tous les programmes
+              await storage.savePrograms([]);
+              setSessions([]);
+              calculateStats([]);
+              Alert.alert("Succès", "Toutes les données ont été effacées avec succès.");
+            } catch (error) {
+              console.error('Erreur lors de la suppression:', error);
+              Alert.alert("Erreur", "Impossible d'effacer les données.");
+            }
+          }
+        }
+      ]
+    );
   };
 
   const formatTime = (seconds: number): string => {
@@ -133,6 +225,26 @@ export default function StatsScreen({ navigation }: Props) {
     </View>
   );
 
+  // Fonction pour calculer le nombre d'exercices complétés dans une session
+  const getCompletedExercisesCount = (session: WorkoutSession): number => {
+    return session.exercises.filter(exercise => {
+      // Un exercice est complété si tous ses sets sont complétés
+      return exercise.sets.length > 0 && exercise.sets.every(set => set.completed);
+    }).length;
+  };
+
+  // Fonction pour calculer le nombre total de sets dans une session
+  const getTotalSetsCount = (session: WorkoutSession): number => {
+    return session.exercises.reduce((total, exercise) => total + exercise.sets.length, 0);
+  };
+
+  // Fonction pour calculer le nombre de sets complétés dans une session
+  const getCompletedSetsCount = (session: WorkoutSession): number => {
+    return session.exercises.reduce((total, exercise) => {
+      return total + exercise.sets.filter(set => set.completed).length;
+    }, 0);
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor="#f8f9fa" />
@@ -141,6 +253,23 @@ export default function StatsScreen({ navigation }: Props) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* En-tête avec bouton d'effacement */}
+        <View style={styles.header}>
+          <Text style={[
+            styles.headerTitle,
+            isSmallScreen && styles.headerTitleSmall
+          ]}>Statistiques</Text>
+          {sessions.length > 0 && (
+            <TouchableOpacity 
+              style={styles.clearButton}
+              onPress={clearHistory}
+            >
+              <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+              <Text style={styles.clearButtonText}>Effacer</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
         {/* Vue d'ensemble */}
         <View style={[
           styles.section,
@@ -165,17 +294,25 @@ export default function StatsScreen({ navigation }: Props) {
 
             <StatCard
               icon="fitness"
-              title="Exercices effectués"
+              title="Exercices"
               value={stats.completedExercises.toString()}
               color="#4CD964"
-              subtitle={`sur ${stats.totalExercises} au total`}
+              subtitle={`${stats.totalExercises} au total`}
+            />
+
+            <StatCard
+              icon="list"
+              title="Séries"
+              value={stats.completedSets.toString()}
+              color="#FF9500"
+              subtitle={`${stats.totalSets} au total`}
             />
 
             <StatCard
               icon="time"
               title="Temps total"
               value={formatTime(stats.totalTime)}
-              color="#FF9500"
+              color="#5856D6"
               subtitle={`Moyenne: ${formatTime(stats.avgTime)}`}
             />
           </View>
@@ -236,7 +373,7 @@ export default function StatsScreen({ navigation }: Props) {
               <Text style={[
                 styles.progressTitle,
                 isSmallScreen && styles.progressTitleSmall
-              ]}>Taux de complétion</Text>
+              ]}>Taux de complétion des séances</Text>
               <Text style={[
                 styles.progressPercent,
                 isSmallScreen && styles.progressPercentSmall
@@ -292,21 +429,68 @@ export default function StatsScreen({ navigation }: Props) {
               />
             </View>
           </View>
+
+          <View style={[
+            styles.progressCard,
+            isSmallScreen && styles.progressCardSmall
+          ]}>
+            <View style={styles.progressHeader}>
+              <Text style={[
+                styles.progressTitle,
+                isSmallScreen && styles.progressTitleSmall
+              ]}>Séries complétées</Text>
+              <Text style={[
+                styles.progressPercent,
+                isSmallScreen && styles.progressPercentSmall
+              ]}>
+                {stats.totalSets > 0 
+                  ? Math.round((stats.completedSets / stats.totalSets) * 100)
+                  : 0}%
+              </Text>
+            </View>
+            <View style={styles.progressBar}>
+              <View 
+                style={[
+                  styles.progressFill, 
+                  { 
+                    width: `${stats.totalSets > 0 
+                      ? (stats.completedSets / stats.totalSets) * 100 
+                      : 0}%`,
+                    backgroundColor: '#FF9500',
+                  }
+                ]} 
+              />
+            </View>
+          </View>
         </View>
 
         {/* Historique récent */}
         <View style={styles.section}>
-          <Text style={[
-            styles.sectionTitle,
-            isSmallScreen && styles.sectionTitleSmall
-          ]}>Historique récent</Text>
+          <View style={styles.historyHeader}>
+            <Text style={[
+              styles.sectionTitle,
+              isSmallScreen && styles.sectionTitleSmall
+            ]}>Historique récent</Text>
+            {sessions.filter(session => session.completed).length > 0 && (
+              <TouchableOpacity 
+                style={styles.clearAllButton}
+                onPress={clearAllData}
+              >
+                <Text style={styles.clearAllButtonText}>Tout effacer</Text>
+              </TouchableOpacity>
+            )}
+          </View>
           
-          {sessions.slice(0, 5).map(session => (
+          {sessions
+            .filter(session => session.completed)
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            .slice(0, 5)
+            .map(session => (
             <View key={session.id} style={[
               styles.historyCard,
               isSmallScreen && styles.historyCardSmall
             ]}>
-              <View style={styles.historyHeader}>
+              <View style={styles.historyCardHeader}>
                 <Text style={[
                   styles.historyDate,
                   isSmallScreen && styles.historyDateSmall
@@ -317,15 +501,19 @@ export default function StatsScreen({ navigation }: Props) {
                     month: 'short' 
                   })}
                 </Text>
-                {session.completed && (
-                  <Ionicons name="checkmark-circle" size={isSmallScreen ? 16 : 20} color="#4CD964" />
-                )}
+                <Ionicons name="checkmark-circle" size={isSmallScreen ? 16 : 20} color="#4CD964" />
               </View>
               <Text style={[
                 styles.historyExercises,
                 isSmallScreen && styles.historyExercisesSmall
               ]}>
-                {session.exercises.filter(e => e.completed).length}/{session.exercises.length} exercices
+                {getCompletedExercisesCount(session)}/{session.exercises.length} exercices
+              </Text>
+              <Text style={[
+                styles.historySets,
+                isSmallScreen && styles.historySetsSmall
+              ]}>
+                {getCompletedSetsCount(session)}/{getTotalSetsCount(session)} séries
               </Text>
               {session.duration && (
                 <Text style={[
@@ -336,7 +524,7 @@ export default function StatsScreen({ navigation }: Props) {
             </View>
           ))}
 
-          {sessions.length === 0 && (
+          {sessions.filter(session => session.completed).length === 0 && (
             <View style={styles.emptyState}>
               <Ionicons 
                 name="stats-chart-outline" 
@@ -371,6 +559,38 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingBottom: 20,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#000',
+  },
+  headerTitleSmall: {
+    fontSize: 24,
+  },
+  clearButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+    gap: 6,
+  },
+  clearButtonText: {
+    color: '#FF3B30',
+    fontSize: 14,
+    fontWeight: '600',
   },
   section: {
     backgroundColor: '#fff',
@@ -532,6 +752,23 @@ const styles = StyleSheet.create({
     backgroundColor: '#007AFF',
     borderRadius: 4,
   },
+  historyHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  clearAllButton: {
+    backgroundColor: '#FF3B30',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  clearAllButtonText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   historyCard: {
     backgroundColor: '#f8f9fa',
     padding: 12,
@@ -542,7 +779,7 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 6,
   },
-  historyHeader: {
+  historyCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -563,6 +800,13 @@ const styles = StyleSheet.create({
   },
   historyExercisesSmall: {
     fontSize: 13,
+  },
+  historySets: {
+    fontSize: 13,
+    color: '#8E8E93',
+  },
+  historySetsSmall: {
+    fontSize: 12,
   },
   historyDuration: {
     fontSize: 13,

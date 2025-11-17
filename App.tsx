@@ -2,7 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { useWindowDimensions, Platform } from 'react-native';
+import { useWindowDimensions, Platform, LogBox } from 'react-native';
 import HomeScreen from './src/screens/HomeScreen';
 import WorkoutScreen from './src/screens/WorkoutScreen';
 import ProgramsScreen from './src/screens/ProgramsScreen';
@@ -21,6 +21,11 @@ export type RootStackParamList = {
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+
+// Ignorer les warnings spécifiques pendant le développement
+LogBox.ignoreLogs([
+  'Non-serializable values were found in the navigation state',
+]);
 
 const useHeaderOptions = () => {
   const { width } = useWindowDimensions();
@@ -49,7 +54,10 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <NavigationContainer>
-        <Stack.Navigator screenOptions={headerOptions}>
+        <Stack.Navigator 
+          screenOptions={headerOptions}
+          initialRouteName="Home"
+        >
           <Stack.Screen 
             name="Home" 
             component={HomeScreen}
@@ -88,10 +96,10 @@ export default function App() {
           <Stack.Screen 
             name="EditProgram" 
             component={EditProgramScreen}
-            options={{ 
-              title: 'Modifier le Programme',
+            options={({ route }) => ({ 
+              title: `Modifier ${route.params.program?.name || 'le Programme'}`,
               headerLargeTitle: false,
-            }}
+            })}
           />
           <Stack.Screen 
             name="Stats" 
