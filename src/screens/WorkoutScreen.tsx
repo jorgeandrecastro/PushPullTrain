@@ -220,32 +220,6 @@ export default function WorkoutScreen({ navigation, route }: Props) {
     // Marquer la série comme complétée
     set.completed = true;
     
-    // Vérifier si c'est un nouveau PR
-    const currentPR = personalRecords[exercise.name];
-    if (set.weight > 0 && (!currentPR || set.weight > currentPR.weight)) {
-      try {
-        await storage.updatePR(exercise.name, set.weight, set.reps);
-        // Recharger les PR
-        const newPR = await storage.getPR(exercise.name);
-        setPersonalRecords(prev => ({
-          ...prev,
-          [exercise.name]: newPR
-        }));
-        
-        // Marquer cette série comme PR
-        set.isPR = true;
-        
-        // Afficher une notification
-        Alert.alert(
-          '🎉 Nouveau Record !',
-          `${exercise.name}: ${set.weight}kg pour ${set.reps} reps`,
-          [{ text: 'Super !' }]
-        );
-      } catch (error) {
-        console.error('Error updating PR:', error);
-      }
-    }
-    
     // Vérifier si c'est la dernière série de l'exercice
     const isLastSet = setIndex === exercise.sets.length - 1;
     const isLastExercise = exerciseIndex === session.exercises.length - 1;
@@ -258,6 +232,45 @@ export default function WorkoutScreen({ navigation, route }: Props) {
     } else {
       // Marquer l'exercice comme complété
       exercise.completed = true;
+      
+      // 🔥 NOUVELLE LOGIQUE : Vérifier le PR à la fin de l'exercice 🔥
+      const currentPR = personalRecords[exercise.name];
+      
+      // Trouver le meilleur set de l'exercice (poids maximum)
+      let bestSet: ExerciseSet | null = null;
+      let bestWeight = 0;
+      
+      for (const set of exercise.sets) {
+        if (set.completed && set.weight > bestWeight) {
+          bestWeight = set.weight;
+          bestSet = set;
+        }
+      }
+      
+      // Vérifier si c'est un nouveau PR (uniquement si l'exercice a des poids)
+      if (bestSet && bestSet.weight > 0 && (!currentPR || bestSet.weight > currentPR.weight)) {
+        try {
+          await storage.updatePR(exercise.name, bestSet.weight, bestSet.reps);
+          // Recharger les PR
+          const newPR = await storage.getPR(exercise.name);
+          setPersonalRecords(prev => ({
+            ...prev,
+            [exercise.name]: newPR
+          }));
+          
+          // Marquer le meilleur set comme PR
+          bestSet.isPR = true;
+          
+          // Afficher la notification à la fin de l'exercice
+          Alert.alert(
+            '🎉 Nouveau Record !',
+            `${exercise.name}: ${bestSet.weight}kg pour ${bestSet.reps} reps`,
+            [{ text: 'Super !' }]
+          );
+        } catch (error) {
+          console.error('Error updating PR:', error);
+        }
+      }
       
       if (!isLastExercise) {
         // Passer à l'exercice suivant
