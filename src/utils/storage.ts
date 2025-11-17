@@ -12,7 +12,7 @@ const validateProgram = (program: any): Program => {
   }
 
   return {
-    id: program.id || `program-${Date.now()}-${Math.random()}`,
+    id: program.id || `program-${Date.now()}`,
     name: program.name || 'Programme sans nom',
     type: program.type || 'custom',
     color: program.color || '#007AFF',
@@ -29,8 +29,8 @@ const validateProgram = (program: any): Program => {
         sets = exercise.sets.map((set: any, setIndex: number) => ({
           id: set.id || `set-${setIndex}-${Date.now()}`,
           setNumber: set.setNumber || setIndex + 1,
-          reps: typeof set.reps === 'number' ? set.reps : 8,
-          weight: typeof set.weight === 'number' ? set.weight : 0,
+          reps: Math.max(0, typeof set.reps === 'number' ? set.reps : 8),
+          weight: Math.max(0, typeof set.weight === 'number' ? set.weight : 0),
           completed: !!set.completed
         }));
       } else {
@@ -39,8 +39,8 @@ const validateProgram = (program: any): Program => {
         sets = Array.from({ length: numSets }, (_, i) => ({
           id: `${exercise.id || `ex-${index}`}-set-${i + 1}`,
           setNumber: i + 1,
-          reps: typeof exercise.reps === 'number' ? exercise.reps : 8,
-          weight: typeof exercise.weight === 'number' ? exercise.weight : 0,
+          reps: Math.max(0, typeof exercise.reps === 'number' ? exercise.reps : 8),
+          weight: Math.max(0, typeof exercise.weight === 'number' ? exercise.weight : 0),
           completed: false
         }));
       }
@@ -71,8 +71,8 @@ const migrateExercise = (oldExercise: any): Exercise => {
     sets.push({
       id: `${oldExercise.id || 'ex'}-set-${i + 1}`,
       setNumber: i + 1,
-      reps: typeof oldExercise.reps === 'number' ? oldExercise.reps : 8,
-      weight: typeof oldExercise.weight === 'number' ? oldExercise.weight : 0,
+      reps: Math.max(0, typeof oldExercise.reps === 'number' ? oldExercise.reps : 8),
+      weight: Math.max(0, typeof oldExercise.weight === 'number' ? oldExercise.weight : 0),
       completed: !!oldExercise.completed
     });
   }

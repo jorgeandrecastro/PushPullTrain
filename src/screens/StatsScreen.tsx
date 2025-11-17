@@ -110,7 +110,7 @@ export default function StatsScreen({ navigation }: Props) {
       totalSets,
       completedSets,
       totalTime,
-      avgTime: completedSessions.length > 0 ? totalTime / completedSessions.length : 0,
+      avgTime: completedSessions.length > 0 ? Math.round(totalTime / completedSessions.length) : 0,
       thisWeek,
       thisMonth,
     });
@@ -159,10 +159,7 @@ export default function StatsScreen({ navigation }: Props) {
           style: "destructive",
           onPress: async () => {
             try {
-              // Effacer toutes les sessions
-              await storage.saveSessions([]);
-              // Effacer tous les programmes
-              await storage.savePrograms([]);
+              await storage.clearAllData();
               setSessions([]);
               calculateStats([]);
               Alert.alert("Succès", "Toutes les données ont été effacées avec succès.");

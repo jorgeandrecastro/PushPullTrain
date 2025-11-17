@@ -51,7 +51,15 @@ const ExerciseSetManager: React.FC<{
   const updateSet = (index: number, field: keyof ExerciseSet, value: any) => {
     const newSets = [...(sets || [])];
     if (newSets[index]) {
-      newSets[index] = { ...newSets[index], [field]: value };
+      let processedValue = value;
+      
+      if (field === 'reps') {
+        processedValue = Math.max(0, parseInt(value) || 0);
+      } else if (field === 'weight') {
+        processedValue = Math.max(0, parseFloat(value) || 0);
+      }
+      
+      newSets[index] = { ...newSets[index], [field]: processedValue };
       onChange(newSets);
     }
   };
@@ -73,14 +81,14 @@ const ExerciseSetManager: React.FC<{
             placeholder="Reps"
             keyboardType="numeric"
             value={(set.reps || 0).toString()}
-            onChangeText={(text) => updateSet(index, 'reps', parseInt(text) || 0)}
+            onChangeText={(text) => updateSet(index, 'reps', text)}
           />
           <TextInput
             style={styles.smallInput}
             placeholder="Poids"
             keyboardType="numeric"
             value={(set.weight || 0).toString()}
-            onChangeText={(text) => updateSet(index, 'weight', parseFloat(text) || 0)}
+            onChangeText={(text) => updateSet(index, 'weight', text)}
           />
           <TouchableOpacity onPress={() => removeSet(index)} style={styles.removeSetButton}>
             <Ionicons name="trash-outline" size={18} color="#FF3B30" />

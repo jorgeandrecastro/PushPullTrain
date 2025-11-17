@@ -114,6 +114,14 @@ export default function HomeScreen({ navigation }: Props) {
     navigation.navigate('Workout', { date: dateStr });
   };
 
+  // Fonction pour calculer le nombre d'exercices complétés dans une session
+  const getCompletedExercisesCount = (session: WorkoutSession): number => {
+    return session.exercises.filter(exercise => {
+      // Un exercice est complété si tous ses sets sont complétés
+      return exercise.sets.length > 0 && exercise.sets.every(set => set.completed);
+    }).length;
+  };
+
   const days = getDaysInMonth(currentDate);
   const cellSize = (Math.min(width, 500) - 32) / 7;
 
@@ -269,14 +277,18 @@ export default function HomeScreen({ navigation }: Props) {
                       styles.sessionInfo,
                       isSmallScreen && styles.sessionInfoSmall
                     ]}>
-                      {session.exercises.length} exercices • 
+                      {getCompletedExercisesCount(session)}/{session.exercises.length} exercices • 
                       {session.duration ? ` ${Math.floor(session.duration / 60)}min` : ' Non terminée'}
                     </Text>
                     <View style={styles.progressBar}>
                       <View 
                         style={[
                           styles.progressFill, 
-                          { width: `${(session.exercises.filter(e => e.completed).length / session.exercises.length) * 100}%` }
+                          { 
+                            width: `${session.exercises.length > 0 
+                              ? (getCompletedExercisesCount(session) / session.exercises.length) * 100 
+                              : 0}%` 
+                          }
                         ]} 
                       />
                     </View>

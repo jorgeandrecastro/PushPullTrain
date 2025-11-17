@@ -573,9 +573,12 @@ export default function WorkoutScreen({ navigation, route }: Props) {
                       </View>
                       <View style={styles.setDetails}>
                         <Text style={styles.setDetail}>{set.reps} reps</Text>
-                        {set.weight > 0 && (
-                          <Text style={styles.setDetail}>{set.weight} kg</Text>
-                        )}
+                        <Text style={[
+                          styles.setDetail,
+                          set.weight === 0 && styles.zeroWeight
+                        ]}>
+                          {set.weight > 0 ? `${set.weight} kg` : 'Poids corps'}
+                        </Text>
                       </View>
                     </TouchableOpacity>
                   ))}
@@ -932,6 +935,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     fontWeight: '500',
+  },
+  zeroWeight: {
+    color: '#8E8E93',
+    fontStyle: 'italic',
   },
 
   // Action Buttons
