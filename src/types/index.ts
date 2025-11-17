@@ -4,6 +4,7 @@ export interface ExerciseSet {
   reps: number;
   weight: number;
   completed: boolean;
+  isPR?: boolean;
 }
 
 export interface Exercise {
@@ -46,4 +47,12 @@ export interface TimerState {
   currentExercise?: string;
   currentSet?: number;
   nextExercise?: string;
+}
+
+export interface PersonalRecord {
+  id: string;
+  exerciseName: string;
+  weight: number;
+  date: string;
+  reps: number;
 }

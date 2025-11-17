@@ -256,15 +256,24 @@ export default function StatsScreen({ navigation }: Props) {
             styles.headerTitle,
             isSmallScreen && styles.headerTitleSmall
           ]}>Statistiques</Text>
-          {sessions.length > 0 && (
+          <View style={styles.headerButtons}>
             <TouchableOpacity 
-              style={styles.clearButton}
-              onPress={clearHistory}
+              style={styles.prButton}
+              onPress={() => navigation.navigate('PRScreen')}
             >
-              <Ionicons name="trash-outline" size={20} color="#FF3B30" />
-              <Text style={styles.clearButtonText}>Effacer</Text>
+              <Ionicons name="trophy" size={20} color="#FF9500" />
+              <Text style={styles.prButtonText}>Records</Text>
             </TouchableOpacity>
-          )}
+            {sessions.length > 0 && (
+              <TouchableOpacity 
+                style={styles.clearButton}
+                onPress={clearHistory}
+              >
+                <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+                <Text style={styles.clearButtonText}>Effacer</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         {/* Vue d'ensemble */}
@@ -572,6 +581,27 @@ const styles = StyleSheet.create({
   },
   headerTitleSmall: {
     fontSize: 24,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  prButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FF9500',
+    gap: 6,
+  },
+  prButtonText: {
+    color: '#FF9500',
+    fontSize: 14,
+    fontWeight: '600',
   },
   clearButton: {
     flexDirection: 'row',

@@ -9,6 +9,7 @@ import ProgramsScreen from './src/screens/ProgramsScreen';
 import CreateProgramScreen from './src/screens/CreateProgramScreen';
 import EditProgramScreen from './src/screens/EditProgramScreen';
 import StatsScreen from './src/screens/StatsScreen';
+import PRScreen from './src/screens/PRScreen';
 import { Program } from './src/types';
 
 export type RootStackParamList = {
@@ -18,6 +19,7 @@ export type RootStackParamList = {
   CreateProgram: undefined;
   EditProgram: { program: Program };
   Stats: undefined;
+  PRScreen: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -106,6 +108,14 @@ export default function App() {
             component={StatsScreen}
             options={{ 
               title: 'Statistiques',
+              headerLargeTitle: Platform.OS === 'ios',
+            }}
+          />
+          <Stack.Screen 
+            name="PRScreen" 
+            component={PRScreen}
+            options={{ 
+              title: 'Mes Records',
               headerLargeTitle: Platform.OS === 'ios',
             }}
           />

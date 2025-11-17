@@ -19,7 +19,7 @@ import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { RootStackParamList } from '../../App';
 import { storage } from '../utils/storage';
-import { WorkoutSession, Exercise, ExerciseSet, Program, TimerState, AppSettings } from '../types';
+import { WorkoutSession, Exercise, ExerciseSet, Program, TimerState, AppSettings, PersonalRecord } from '../types';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Workout'>;
@@ -54,6 +54,9 @@ export default function WorkoutScreen({ navigation, route }: Props) {
   // États pour suivre l'exercice et la série en cours
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
   const [currentSetIndex, setCurrentSetIndex] = useState(0);
+
+  // États pour les records personnels
+  const [personalRecords, setPersonalRecords] = useState<{[key: string]: PersonalRecord | null}>({});
 
   // Animation pour le timer de repos
   const scaleAnim = React.useRef(new Animated.Value(1)).current;
@@ -114,6 +117,9 @@ export default function WorkoutScreen({ navigation, route }: Props) {
         const existingSession = sessions[0];
         setSession(existingSession);
         
+        // Charger les records personnels
+        await loadPersonalRecords(existingSession.exercises);
+        
         // Trouver le premier exercice et série non complétés
         let foundExerciseIndex = 0;
         let foundSetIndex = 0;
@@ -155,6 +161,15 @@ export default function WorkoutScreen({ navigation, route }: Props) {
     }
   };
 
+  const loadPersonalRecords = async (exercises: Exercise[]) => {
+    const records: {[key: string]: PersonalRecord | null} = {};
+    for (const exercise of exercises) {
+      const pr = await storage.getPR(exercise.name);
+      records[exercise.name] = pr;
+    }
+    setPersonalRecords(records);
+  };
+
   const createSessionFromProgram = async (program: Program) => {
     try {
       const newSession: WorkoutSession = {
@@ -164,7 +179,7 @@ export default function WorkoutScreen({ navigation, route }: Props) {
         exercises: program.exercises.map(ex => ({
           ...ex,
           completed: false,
-          sets: ex.sets.map(set => ({ ...set, completed: false }))
+          sets: ex.sets.map(set => ({ ...set, completed: false, isPR: false }))
         })),
         completed: false,
       };
@@ -173,6 +188,7 @@ export default function WorkoutScreen({ navigation, route }: Props) {
       setCurrentExerciseIndex(0);
       setCurrentSetIndex(0);
       setShowProgramSelector(false);
+      await loadPersonalRecords(newSession.exercises);
     } catch (error) {
       Alert.alert('Erreur', 'Impossible de créer la séance');
     }
@@ -203,6 +219,32 @@ export default function WorkoutScreen({ navigation, route }: Props) {
     
     // Marquer la série comme complétée
     set.completed = true;
+    
+    // Vérifier si c'est un nouveau PR
+    const currentPR = personalRecords[exercise.name];
+    if (set.weight > 0 && (!currentPR || set.weight > currentPR.weight)) {
+      try {
+        await storage.updatePR(exercise.name, set.weight, set.reps);
+        // Recharger les PR
+        const newPR = await storage.getPR(exercise.name);
+        setPersonalRecords(prev => ({
+          ...prev,
+          [exercise.name]: newPR
+        }));
+        
+        // Marquer cette série comme PR
+        set.isPR = true;
+        
+        // Afficher une notification
+        Alert.alert(
+          '🎉 Nouveau Record !',
+          `${exercise.name}: ${set.weight}kg pour ${set.reps} reps`,
+          [{ text: 'Super !' }]
+        );
+      } catch (error) {
+        console.error('Error updating PR:', error);
+      }
+    }
     
     // Vérifier si c'est la dernière série de l'exercice
     const isLastSet = setIndex === exercise.sets.length - 1;
@@ -540,12 +582,19 @@ export default function WorkoutScreen({ navigation, route }: Props) {
                     ) : (
                       <Text style={styles.exerciseNumber}>{exerciseIndex + 1}</Text>
                     )}
-                    <Text style={[
-                      styles.exerciseName,
-                      exercise.completed && styles.exerciseNameCompleted
-                    ]}>
-                      {exercise.name}
-                    </Text>
+                    <View style={styles.exerciseNameContainer}>
+                      <Text style={[
+                        styles.exerciseName,
+                        exercise.completed && styles.exerciseNameCompleted
+                      ]}>
+                        {exercise.name}
+                      </Text>
+                      {personalRecords[exercise.name] && (
+                        <Text style={styles.prText}>
+                          PR: {personalRecords[exercise.name]!.weight}kg
+                        </Text>
+                      )}
+                    </View>
                   </View>
                   <Text style={styles.restTimeText}>{exercise.restTime}s repos</Text>
                 </View>
@@ -560,16 +609,22 @@ export default function WorkoutScreen({ navigation, route }: Props) {
                         set.completed && styles.setCardCompleted,
                         exerciseIndex === currentExerciseIndex && 
                         setIndex === currentSetIndex && 
-                        styles.setCardCurrent
+                        styles.setCardCurrent,
+                        set.isPR && styles.setCardPR
                       ]}
                       onPress={() => !set.completed && completeSet(exerciseIndex, setIndex)}
                       disabled={set.completed}
                     >
                       <View style={styles.setHeader}>
                         <Text style={styles.setNumber}>Série {set.setNumber}</Text>
-                        {set.completed && (
-                          <Ionicons name="checkmark" size={16} color="#34C759" />
-                        )}
+                        <View style={styles.setIcons}>
+                          {set.isPR && (
+                            <Ionicons name="trophy" size={16} color="#FF9500" />
+                          )}
+                          {set.completed && (
+                            <Ionicons name="checkmark" size={16} color="#34C759" />
+                          )}
+                        </View>
                       </View>
                       <View style={styles.setDetails}>
                         <Text style={styles.setDetail}>{set.reps} reps</Text>
@@ -867,6 +922,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
+  exerciseNameContainer: {
+    flex: 1,
+  },
   exerciseNumber: {
     width: 24,
     height: 24,
@@ -880,11 +938,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#000',
-    flex: 1,
   },
   exerciseNameCompleted: {
     textDecorationLine: 'line-through',
     color: '#666',
+  },
+  prText: {
+    fontSize: 12,
+    color: '#FF9500',
+    fontWeight: '600',
+    marginTop: 2,
   },
   restTimeText: {
     fontSize: 14,
@@ -916,6 +979,10 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     backgroundColor: '#f0f8ff',
   },
+  setCardPR: {
+    borderColor: '#FF9500',
+    backgroundColor: '#FFF4E5',
+  },
   setHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -926,6 +993,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#000',
+  },
+  setIcons: {
+    flexDirection: 'row',
+    gap: 4,
   },
   setDetails: {
     flexDirection: 'row',

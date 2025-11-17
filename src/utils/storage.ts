@@ -1,9 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { WorkoutSession, Program, AppSettings, Exercise, ExerciseSet } from '../types';
+import { WorkoutSession, Program, AppSettings, Exercise, ExerciseSet, PersonalRecord } from '../types';
 
 const SESSIONS_KEY = 'workout_sessions';
 const PROGRAMS_KEY = 'workout_programs';
 const SETTINGS_KEY = 'app_settings';
+const PRS_KEY = 'personal_records';
 
 // Fonction utilitaire pour valider et corriger un programme
 const validateProgram = (program: any): Program => {
@@ -31,7 +32,8 @@ const validateProgram = (program: any): Program => {
           setNumber: set.setNumber || setIndex + 1,
           reps: Math.max(0, typeof set.reps === 'number' ? set.reps : 8),
           weight: Math.max(0, typeof set.weight === 'number' ? set.weight : 0),
-          completed: !!set.completed
+          completed: !!set.completed,
+          isPR: !!set.isPR
         }));
       } else {
         // Ancienne structure à migrer
@@ -41,7 +43,8 @@ const validateProgram = (program: any): Program => {
           setNumber: i + 1,
           reps: Math.max(0, typeof exercise.reps === 'number' ? exercise.reps : 8),
           weight: Math.max(0, typeof exercise.weight === 'number' ? exercise.weight : 0),
-          completed: false
+          completed: false,
+          isPR: false
         }));
       }
 
@@ -73,7 +76,8 @@ const migrateExercise = (oldExercise: any): Exercise => {
       setNumber: i + 1,
       reps: Math.max(0, typeof oldExercise.reps === 'number' ? oldExercise.reps : 8),
       weight: Math.max(0, typeof oldExercise.weight === 'number' ? oldExercise.weight : 0),
-      completed: !!oldExercise.completed
+      completed: !!oldExercise.completed,
+      isPR: false
     });
   }
   
@@ -114,7 +118,7 @@ export const storage = {
   // Fonction pour effacer toutes les données
   async clearAllData(): Promise<void> {
     try {
-      await AsyncStorage.multiRemove([SESSIONS_KEY, PROGRAMS_KEY, SETTINGS_KEY]);
+      await AsyncStorage.multiRemove([SESSIONS_KEY, PROGRAMS_KEY, SETTINGS_KEY, PRS_KEY]);
     } catch (error) {
       console.error('Error clearing all data:', error);
       throw error;
@@ -281,6 +285,75 @@ export const storage = {
         restBetweenSets: 90,
         restBetweenExercises: 120
       };
+    }
+  },
+
+  // Personal Records
+  async savePRs(prs: PersonalRecord[]): Promise<void> {
+    try {
+      await AsyncStorage.setItem(PRS_KEY, JSON.stringify(prs));
+    } catch (error) {
+      console.error('Error saving PRs:', error);
+      throw error;
+    }
+  },
+
+  async loadPRs(): Promise<PersonalRecord[]> {
+    try {
+      const data = await AsyncStorage.getItem(PRS_KEY);
+      return data ? JSON.parse(data) : [];
+    } catch (error) {
+      console.error('Error loading PRs:', error);
+      return [];
+    }
+  },
+
+  async updatePR(exerciseName: string, weight: number, reps: number): Promise<void> {
+    try {
+      const prs = await this.loadPRs();
+      const existingPR = prs.find(pr => 
+        pr.exerciseName === exerciseName && pr.reps === reps
+      );
+
+      if (existingPR) {
+        if (weight > existingPR.weight) {
+          // Nouveau record
+          existingPR.weight = weight;
+          existingPR.date = new Date().toISOString().split('T')[0];
+        }
+      } else {
+        // Premier record pour cet exercice avec ce nombre de reps
+        const newPR: PersonalRecord = {
+          id: `pr-${Date.now()}`,
+          exerciseName,
+          weight,
+          reps,
+          date: new Date().toISOString().split('T')[0],
+        };
+        prs.push(newPR);
+      }
+
+      await this.savePRs(prs);
+    } catch (error) {
+      console.error('Error updating PR:', error);
+      throw error;
+    }
+  },
+
+  async getPR(exerciseName: string, reps?: number): Promise<PersonalRecord | null> {
+    try {
+      const prs = await this.loadPRs();
+      const filtered = reps 
+        ? prs.filter(pr => pr.exerciseName === exerciseName && pr.reps === reps)
+        : prs.filter(pr => pr.exerciseName === exerciseName);
+      
+      if (filtered.length === 0) return null;
+      
+      // Retourne le record le plus lourd
+      return filtered.reduce((max, pr) => pr.weight > max.weight ? pr : max);
+    } catch (error) {
+      console.error('Error getting PR:', error);
+      return null;
     }
   },
 };
